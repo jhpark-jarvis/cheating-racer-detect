@@ -1,0 +1,24 @@
+# Local runtimes, downloaded tools, generated output and private data
+.venv/
+.tools/
+.artifacts/
+data/
+output/
+outputs/
+*.partial/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+*.log
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.coverage

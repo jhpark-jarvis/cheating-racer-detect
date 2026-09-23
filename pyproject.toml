@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cheating-racer-detect"
+version = "0.1.0"
+description = "Local dashcam review clip preparation"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[project.scripts]
+crd = "cheating_racer_detect.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cheating_racer_detect*"]

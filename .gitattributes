@@ -1,0 +1,2 @@
+# Keep text snapshots reproducible across Windows and future server checkouts.
+* text=auto eol=lf
