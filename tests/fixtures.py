@@ -170,9 +170,15 @@ def generate(toolchain, root: Path) -> dict[str, Path]:
     ])
     for angle in (90, 180, 270):
         run(prefix + [
-            "-i", str(media["audio"]), "-map", "0", "-c", "copy",
-            "-metadata:s:v:0", f"rotate={angle}", str(media[f"rotation{angle}"]),
+            "-display_rotation:v:0", str(angle), "-i", str(media["audio"]),
+            "-map", "0", "-c", "copy", str(media[f"rotation{angle}"]),
         ])
+        stream = next(s for s in probe(toolchain, media[f"rotation{angle}"])["streams"]
+                      if s["codec_type"] == "video")
+        rotations = [int(item["rotation"]) % 360 for item in stream.get("side_data_list", [])
+                     if "rotation" in item]
+        if rotations != [angle]:
+            raise AssertionError(f"Fixture did not preserve requested display rotation {angle}")
     run(prefix + [
         "-i", str(media["cfr"]), "-c:v", "mpeg4", "-q:v", "3", str(media["unsupported"]),
     ])

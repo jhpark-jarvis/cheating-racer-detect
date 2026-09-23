@@ -5,6 +5,8 @@ This driver gives the CLI its own console process group. CTRL_BREAK_EVENT goes
 only to that group; it never broadcasts to the user's console or services.
 Observed media children are held by OS handles, avoiding PID reuse during the
 termination checks / emergency cleanup. No mocks replace the product process.
+With --force the driver terminates only those owned processes, verifies retained
+crash residue across retry, then removes its identity-checked fixture residue.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -73,6 +76,7 @@ def children(api, parent_pid: int) -> list[tuple[int, str]]:
 
 def main() -> int:
     source, output, tools_dir = map(Path, sys.argv[1:4])
+    force = sys.argv[4:] == ['--force']
     api = windows_api()
     process = None
     retry_process = None
@@ -125,13 +129,33 @@ def main() -> int:
                 "Could not observe an active owned media process before completion: "
                 f"exit={exit_code}, code={code}, temporary_seen={temporary_seen}, observed={len(observed)}"
             )
-        os.kill(process.pid, signal.CTRL_BREAK_EVENT)
-        stdout, stderr = process.communicate(timeout=15)
-        response = json.loads(stderr.decode("utf-8"))
-        if process.returncode != 130 or response.get("code") != "CANCELLED":
-            raise AssertionError(f"Expected cancellation; got exit={process.returncode}, code={response.get('code')}")
-        if output.exists() or set(output.parent.glob(".crd-*.partial")) != before:
-            raise AssertionError("Cancellation left a final result or owned temporary directory")
+        leftovers = {}
+        if force:
+            for path in set(output.parent.glob('.crd-*.partial')) - before:
+                stat = path.stat()
+                leftovers[path] = (stat.st_dev, stat.st_ino)
+            # Kill the launcher/interpreter before media so graceful exception
+            # handling cannot clean the crash fixture. Only held owned handles.
+            observe_children(process, observed)
+            process.kill()
+            for handle, name in sorted(observed.values(), key=lambda item: item[1].lower() in {'ffmpeg.exe', 'ffprobe.exe'}):
+                if api.WaitForSingleObject(handle, 0) == 258:
+                    if not api.TerminateProcess(handle, 1):
+                        raise OSError(ctypes.get_last_error(), 'Owned process termination failed')
+            stdout, stderr = process.communicate(timeout=15)
+            response = {'code': None}
+            if not process.returncode or output.exists() or not leftovers:
+                raise AssertionError('Forced termination unexpectedly published or left no crash fixture')
+            if set(output.parent.glob('.crd-*.partial')) != before | set(leftovers):
+                raise AssertionError('Crash residue does not match captured owned directories')
+        else:
+            os.kill(process.pid, signal.CTRL_BREAK_EVENT)
+            stdout, stderr = process.communicate(timeout=15)
+            response = json.loads(stderr.decode("utf-8"))
+            if process.returncode != 130 or response.get("code") != "CANCELLED":
+                raise AssertionError(f"Expected cancellation; got exit={process.returncode}, code={response.get('code')}")
+            if output.exists() or set(output.parent.glob(".crd-*.partial")) != before:
+                raise AssertionError("Cancellation left a final result or owned temporary directory")
         for handle, _ in observed.values():
             if api.WaitForSingleObject(handle, 3000) != 0:
                 raise AssertionError("An owned media child survived cancellation")
@@ -148,12 +172,25 @@ def main() -> int:
             raise AssertionError("Retry of the same output after cancellation failed")
         if any(api.WaitForSingleObject(handle, 3000) != 0 for handle, _ in retry_observed.values()):
             raise AssertionError("An owned retry child survived completion")
+        if force:
+            if set(output.parent.glob('.crd-*.partial')) != before | set(leftovers):
+                raise AssertionError('Retry changed another invocation crash residue')
+            for path, identity in leftovers.items():
+                stat = path.lstat()
+                if (path.resolve().parent != output.parent.resolve() or path.is_symlink()
+                        or getattr(stat, 'st_file_attributes', 0) & 0x400
+                        or (stat.st_dev, stat.st_ino) != identity):
+                    raise AssertionError('Crash residue ownership changed; refuse cleanup')
+                shutil.rmtree(path)
+            if set(output.parent.glob('.crd-*.partial')) != before:
+                raise AssertionError('Test-owned crash residue cleanup failed')
         print(json.dumps({
-            "status": "passed", "event": "CTRL_BREAK_EVENT", "cancel_exit": process.returncode,
+            "status": "passed", "event": "TerminateProcess" if force else "CTRL_BREAK_EVENT", "cancel_exit": process.returncode,
             "cancel_code": response["code"], "cli_pid": process.pid,
             "observed_children": [{"pid": pid, "name": value[1]} for pid, value in observed.items()],
             "children_exited": True, "temporary_cleaned": True, "retry_exit": retry_process.returncode,
             "original_console_untouched": True,
+            "crash_residue_preserved_on_retry": bool(leftovers),
         }))
         return 0
     except Exception as error:

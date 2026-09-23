@@ -39,6 +39,26 @@ pwsh -NoProfile -File scripts/bootstrap.ps1 -DownloadTools
 
 진입점은 [CLI](cheating_racer_detect/cli.py), 트랜잭션과 원본 보존은 [service](cheating_racer_detect/service.py), 미디어 시간 처리·검증은 [media](cheating_racer_detect/media.py), 로컬 경계는 [paths](cheating_racer_detect/paths.py), 도구/프로세스 관리는 [tools](cheating_racer_detect/tools.py)다.
 
+### 수동 재생·취소 확인
+
+민감 정보가 없는 합성 검토 자료를 새 폴더에 생성할 수 있다. 기존 폴더는 덮어쓰지 않는다. `.artifacts` 상위 폴더를 먼저 준비하고 아래 명령을 코드 저장소 루트에서 실행한다.
+
+```powershell
+New-Item -ItemType Directory -Path .artifacts -Force | Out-Null
+.\.venv\Scripts\python.exe -m scripts.prepare_manual_qa --output .artifacts/manual-qa --with-cancel
+```
+
+`fixtures/`의 원본과 각 `audio`, `cfr`, `rotation90`, `rotation180`, `rotation270` 폴더의 `clip.mp4`를 플레이어에서 비교한다. 재생·일시정지·탐색이 되고 회전된 표시 방향이 원본과 같아야 한다. `audio`는 오른쪽 흰색 flash와 beep가 약 1.15초에 함께 나오며, `cfr`는 음성 트랙이 없어야 한다. 결과는 요청 시작 0.35초부터 끝 2.35초 사이에 표시를 시작하는 프레임을 포함한다. 영상 길이만으로 프레임 정합성을 판단하지 않는다.
+
+실제 키 입력 취소는 아래 명령 실행 중 Ctrl+C를 누른 후 `$LASTEXITCODE`가 130인지, `CANCELLED`가 나오는지, 최종 `cancel-result`와 이번 작업의 `.crd-*.partial`이 남지 않는지 확인한다. 같은 명령을 다시 실행해 정상 완료(exit 0, 영상+JSON)를 확인한다. 너무 빨리 완료되면 테스트를 PASS로 기록하지 말고 새 출력 이름으로 다시 시도한다.
+
+```powershell
+.\.venv\Scripts\python.exe -m cheating_racer_detect clip --input .artifacts/manual-qa/cancel-source.mp4 --start 0.35 --end 2.35 --output .artifacts/manual-qa/cancel-result
+$LASTEXITCODE
+```
+
+합성 자료 생성 성공은 사람의 재생·소리·키 입력 확인을 의미하지 않는다. 플레이어/버전·관측 결과는 별도로 기록한다. 생성 자료는 자동 삭제하지 않으며 확인 후 해당 QA 폴더만 소유자가 정리한다. 디스크 부족/코덱 부재는 자동 테스트의 안전한 오류 주입으로 확인하며 실제 디스크를 채우거나 설치된 코덱을 삭제하지 않는다.
+
 ## 공개 준비 상태
 
 현재는 로컬 개발 단계이며 자동 차량·차선·방향지시등 탐지는 미구현이다. 실영상·수동 재생·장시간 처리 성능·패키지 배포 검증이 남아 있다. 프로젝트 라이선스는 아직 정하지 않았으며 공개/재배포 전에 별도로 확정한다.

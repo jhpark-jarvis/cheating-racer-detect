@@ -220,7 +220,16 @@ class RealMediaIntegration(unittest.TestCase):
             with self.subTest(angle=angle):
                 fixture = f"rotation{angle}"
                 source = self.media[fixture]
+                stream = next(s for s in probe(self.tools, source)['streams'] if s['codec_type'] == 'video')
+                rotations = [int(item['rotation']) % 360 for item in stream.get('side_data_list', [])
+                             if 'rotation' in item]
+                self.assertEqual(rotations, [angle], 'Fixture must actually carry the requested rotation')
                 output, _ = self.clip(fixture, "0.35", "0.85", f"rotation-{angle}-result")
+                expected = (HEIGHT, WIDTH) if angle in (90, 270) else (WIDTH, HEIGHT)
+                video = next(s for s in probe(self.tools, output / 'clip.mp4')['streams'] if s['codec_type'] == 'video')
+                self.assertEqual((video['width'], video['height']), expected)
+                self.assertTrue(all(int(item.get('rotation', 0)) % 360 == 0
+                                    for item in video.get('side_data_list', [])))
                 self.assert_content_and_timing(source, output / "clip.mp4", 0.35, 0.85)
 
     def test_f06_existing_output_and_source_collision_are_preserved(self):
@@ -284,9 +293,16 @@ class RealMediaIntegration(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "NOT_RUN: Windows console cancellation requires Windows")
     def test_f09_real_console_cancellation_cleanup_and_retry(self):
+        self.check_console_recovery(force=False)
+
+    @unittest.skipUnless(os.name == "nt", "NOT_RUN: Windows process termination requires Windows")
+    def test_f09_forced_termination_residue_and_retry(self):
+        self.check_console_recovery(force=True)
+
+    def check_console_recovery(self, *, force):
         source = self.media["audio"]
         original_hash = sha256(source)
-        output = self.root / "console-cancel-and-retry"
+        output = self.root / ("forced-stop-and-retry" if force else "console-cancel-and-retry")
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = subprocess.SW_HIDE
@@ -295,13 +311,17 @@ class RealMediaIntegration(unittest.TestCase):
         result = subprocess.run([
             sys.executable, "-m", "tests.cancel_driver", str(source), str(output),
             str(Path(self.tools.ffmpeg).parent),
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        ] + (['--force'] if force else []), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
             creationflags=subprocess.CREATE_NEW_CONSOLE, startupinfo=startup)
         self.assertEqual(result.returncode, 0, result.stdout.decode("utf-8", errors="replace"))
         evidence = json.loads(result.stdout.decode("utf-8"))
-        self.assertEqual(evidence["event"], "CTRL_BREAK_EVENT")
-        self.assertEqual(evidence["cancel_exit"], 130)
-        self.assertEqual(evidence["cancel_code"], "CANCELLED")
+        self.assertEqual(evidence["event"], "TerminateProcess" if force else "CTRL_BREAK_EVENT")
+        if force:
+            self.assertNotEqual(evidence['cancel_exit'], 0)
+            self.assertTrue(evidence['crash_residue_preserved_on_retry'])
+        else:
+            self.assertEqual(evidence["cancel_exit"], 130)
+            self.assertEqual(evidence["cancel_code"], "CANCELLED")
         self.assertTrue(evidence["observed_children"])
         self.assertTrue(evidence["children_exited"])
         self.assertTrue(evidence["temporary_cleaned"])
