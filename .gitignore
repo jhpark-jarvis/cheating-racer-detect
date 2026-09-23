@@ -22,3 +22,9 @@ __pycache__/
 build/
 dist/
 .coverage
+
+# Local development notes are maintained outside the public source history.
+/AGENTS.md
+/docs/
+/.local-backup/
+/.local-work/
