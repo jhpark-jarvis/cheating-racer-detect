@@ -1,4 +1,4 @@
-# Local runtimes, downloaded tools, generated output and private data
+# Local runtimes and generated files
 .venv/
 .tools/
 .artifacts/
@@ -23,7 +23,7 @@ build/
 dist/
 .coverage
 
-# Local development notes are maintained outside the public source history.
+# Local workspace files
 /AGENTS.md
 /docs/
 /.local-backup/
