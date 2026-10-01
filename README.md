@@ -27,7 +27,9 @@ pwsh -NoProfile -File scripts/bootstrap.ps1 -DownloadTools
 
 오류는 표준 오류에 JSON 코드/메시지와 종료 코드 2, 취소는 `CANCELLED`와 130으로 전달한다. Ctrl+C/Ctrl+Break를 처리한다. 처리 중에는 `.crd-*.partial`만 만들고 검증 뒤 최종 디렉터리로 확정한다. 강제 종료로 잔재가 남으면 해당 작업 소유인지 확인하고 정리한 뒤 새 출력 이름으로 다시 실행한다. 프로그램은 다른 작업의 잔재를 자동 삭제하지 않는다.
 
-분석 기반으로 Python, FFmpeg/ffprobe, OpenCV, PyTorch가 승인됐다. 첫 CLI의 입출력은 `argparse`·`subprocess`·`decimal/fractions`·`json`, 테스트는 `unittest`, 환경은 `venv`를 사용한다. 제3자 Python 런타임 의존성은 없다. OpenCV/PyTorch는 아직 설치하지 않았으며 모델별 종속성과 GPU 검증 후 버전을 고정한다. UI·DB·웹서버도 아직 채택하지 않았다.
+분석 기반으로 Python, FFmpeg/ffprobe, OpenCV, PyTorch가 승인됐다. 첫 CLI의 입출력은 `argparse`·`subprocess`·`decimal/fractions`·`json`, 테스트는 `unittest`, 환경은 `venv`를 사용한다. 첫 CLI의 제3자 Python 런타임 의존성은 없다. 분석 실험은 기존 `.venv`와 분리된 `.tools/analysis-venv`에서 수행하며 기본 설치나 `doctor`/`clip`에 ML 패키지를 추가하지 않는다. UI·DB·웹서버도 아직 채택하지 않았다.
+
+2026-10-01 Windows Python 3.13.13·RTX 2070·드라이버 560.94에서 PyTorch 2.8.0+cu126/TorchVision 0.23.0+cu126·OpenCV 4.11.0.86의 로컬 합성 실행을 검증했다. 공식 YOLOX-s 가중치의 제한된 로딩과 CPU/GPU 추론, 호환 수정한 ByteTrack의 합성 상자 추적 실험이 통과했다. 이는 제품 분석 명령이나 실영상 정확도·처리 속도·최종 모델/라이선스 채택을 뜻하지 않는다. 연구용 소스·가중치·환경은 Git에서 제외하며, 출처/재배포 조건을 확인하기 전 공개 제품에 원저자 추적 코드를 포함하지 않는다.
 
 ## 개발·검증
 
