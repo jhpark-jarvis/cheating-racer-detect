@@ -9,6 +9,9 @@ description = "Local dashcam review clip preparation"
 requires-python = ">=3.13,<3.14"
 dependencies = []
 
+[project.optional-dependencies]
+tracking = ["numpy==2.2.6", "opencv-python==4.11.0.86"]
+
 [project.scripts]
 crd = "cheating_racer_detect.cli:main"
 
