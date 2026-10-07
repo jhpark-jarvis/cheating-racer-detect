@@ -9,10 +9,10 @@
 | --- | --- | --- |
 | Python | CLI·작업 제어·원본/결과 기록 | 사용 중 |
 | FFmpeg / ffprobe | 영상 정보·시간축 분석, 디코딩·클립 추출 | 사용 중 |
-| OpenCV | 프레임·차량 관심 영역(ROI) 전처리 | 분석 실험 |
+| OpenCV | 프레임·차량 ROI 전처리, 가변 시간 간격 움직임 예측 | 추적 모듈 합성 검증 |
 | PyTorch | 차량·차선 분석 모델의 추론 기반 | 차량 탐지 합성 검증 |
 
-차량 탐지·추적은 YOLOX-s + ByteTrack 조합을 실험 중이며, 최종 모델은 미정입니다.
+차량 탐지는 YOLOX-s를 실험 중이며 최종 모델은 미정입니다. 추적은 OpenCV 움직임 예측과 독립 관측 연결·ID 관리 모듈을 제공합니다.
 
 ## 구현 방향
 
@@ -53,11 +53,19 @@ HEVC·HDR·데이터/자막/다중 영상 트랙·분할 파일 결합 및 네�
 
 ## 개발 및 검증
 
+[추적 모듈](cheating_racer_detect/tracking/tracker.py)은 원본 PTS의 실제 시간 간격, 클래스별 관측 연결, 짧은 가림·초 단위 만료를 처리합니다.
+모호한 연결은 이력을 끊고 예측과 실제 관측을 구분합니다. 자동 영상 분석 명령은 아직 제공하지 않습니다.
+`Tracker.update(frame, detections)`에는 원본 시각을 담은 `Frame`, 같은 프레임의 `Detection`, 명시적인 `Policy`가 필요합니다.
+좌표는 원본 coded raster의 half-open xyxy이며 회전은 메타데이터로 유지합니다. 정책 수치는 실제 차량 평가로 정해야 합니다.
+
+추적 모듈에만 NumPy/OpenCV가 필요합니다. 별도 Python 환경에서 `python -m pip install ".[tracking]"`으로 준비할 수 있으며 기존 클립 CLI에는 필요하지 않습니다.
+
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 테스트는 자체 합성 영상을 사용합니다. FFmpeg가 없으면 통합 테스트가 건너뛰어지므로 전체 검증으로 볼 수 없습니다.
+NumPy/OpenCV가 없으면 실제 추적 엔진 테스트도 건너뛰어집니다. 순수 계약 테스트와 실제 엔진 검증은 구분해야 합니다.
 수동 확인용 합성 자료 생성은 [QA 도구](scripts/prepare_manual_qa.py)의 `--help`를 참고하세요.
 실영상 적합성·수동 재생·장시간 성능·패키지 배포는 검증이 남아 있으며, 현재 처리 시간은 원본 전체 길이의 영향을 받습니다.
 
