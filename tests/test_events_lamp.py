@@ -58,8 +58,21 @@ class Lamps(unittest.TestCase):
     def test_cycles_outside_requested_window_do_not_count(self):
         engine = self.sequence([20, 220, 20, 220, 20, 20, 20, 20, 20])
         result = engine.report(F(1, 5), F(4, 5))
-        self.assertEqual(result['left']['state'], 'no_blink_observed')
+        self.assertEqual(result['left']['state'], 'unknown')
         self.assertFalse(result['left']['blink_evidence'])
+
+    def test_incomplete_or_invalid_pulse_is_unknown_not_no_blink(self):
+        for values in ([20]*5+[220]*4, [220]*3+[20]*3+[220]*3):
+            result = self.sequence(values).report(F(0), F(4, 5))
+            self.assertEqual(result['left']['state'], 'unknown')
+            self.assertIn('insufficient_cycles', result['left']['reasons'])
+        engine = LampEngine(replace(config(), min_phase=F(3, 10)))
+        for n, value in enumerate([20, 220, 20, 220, 20, 220, 20, 20, 20]):
+            f = frame(n)
+            engine.update(f, vehicle(f), pixels(f, value), *rois())
+        result = engine.report(F(0), F(4, 5))
+        self.assertEqual(result['left']['state'], 'unknown')
+        self.assertIn('model_uncertain', result['left']['reasons'])
 
     def test_short_uncovered_empty_and_ambiguous_brightness(self):
         engine = self.sequence([20]*9)
@@ -107,6 +120,15 @@ class Lamps(unittest.TestCase):
             self.assertEqual(engine.report(F(0), F(1))['samples'], [])
         f = frame(0)
         self.assertEqual(engine.update(f, vehicle(f), pixels(f), *rois())['sample_count'], 1)
+
+    def test_model_provenance_change_cannot_extend_window(self):
+        engine = self.sequence([20]*9)
+        f = frame(9)
+        observed = vehicle(f)
+        observed = replace(observed, detection=replace(observed.detection, model_id='other'))
+        engine.update(f, observed, pixels(f), *rois())
+        self.assertEqual(engine.report(F(0), F(9, 10))['signal_state'], 'unknown')
+        self.assertEqual(len(engine.frames()), 1)
 
     def test_policy_bounds_cycle_durations_hysteresis_and_sample_bound(self):
         for change in ({'off_threshold': 180}, {'on_threshold': float('nan')}, {'min_cycles': True},

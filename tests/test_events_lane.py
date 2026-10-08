@@ -116,6 +116,17 @@ class LaneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Vehicle.from_tracking(current, report, key)
 
+    def test_model_provenance_change_aborts_old_candidate(self):
+        engine = LaneEngine(config())
+        for n in range(3):
+            f = frame(n)
+            engine.update(f, vehicle(f), lanes(f))
+        for n in range(3, 7):
+            f = frame(n)
+            observed = vehicle(f, 72)
+            observed = replace(observed, detection=replace(observed.detection, model_id='other'))
+            self.assertIsNone(engine.update(f, observed, lanes(f))['candidate'])
+
     def test_contract_bounds_unknown_lanes_and_nonadjacent(self):
         for changes in ({'margin': 0}, {'dwell': .2}, {'max_gap': F(0)}, {'min_lane_pixels': float('nan')}):
             with self.assertRaises(ValueError):

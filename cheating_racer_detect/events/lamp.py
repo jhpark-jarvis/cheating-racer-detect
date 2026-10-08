@@ -67,9 +67,16 @@ class LampEngine:
         self.reset()
 
     def reset(self):
-        self._previous = self._identity = None
+        self._previous = self._identity = self._model = None
         self._samples = deque(maxlen=120)
         self._reason = 'start'
+
+    @property
+    def identity(self):
+        return self._identity
+
+    def frames(self):
+        return tuple(sample['frame'] for sample in self._samples)
 
     def update(self, frame, vehicle, pixels, left, right):
         try:
@@ -108,16 +115,16 @@ class LampEngine:
             self.reset()
             self._reason = 'no_actual_observation'
             return {'status': 'unknown', 'reason': self._reason}
-        if reason or self._identity != vehicle.identity:
+        if reason or self._identity != vehicle.identity or self._model != vehicle.detection.model_id:
             self.reset()
-            self._reason = reason or 'identity_change'
+            self._reason = reason or 'identity_or_model_change'
         if any(isinstance(roi, LampROI) and roi.status == 'identity_uncertain' for roi in (left, right)):
             self.reset()
             self._reason = 'identity_uncertain'
         sample = {'frame': frame, 'left': self._roi(vehicle, pixels, left),
                   'right': self._roi(vehicle, pixels, right), 'vehicle': vehicle.report()}
         self._samples.append(sample)
-        self._previous, self._identity = frame, vehicle.identity
+        self._previous, self._identity, self._model = frame, vehicle.identity, vehicle.detection.model_id
         return {'status': 'recorded', 'reason': self._reason, 'sample_count': len(self._samples)}
 
     def _side(self, samples, side, complete, start, end):
@@ -126,6 +133,7 @@ class LampEngine:
             reasons.append('insufficient_history')
         phase = None
         transitions, cycles = [], []
+        changes_in_window = 0
         for sample in samples:
             item, time = sample[side], sample['frame'].time
             if item['status'] != 'usable':
@@ -141,14 +149,19 @@ class LampEngine:
             if state != phase:
                 if phase is not None:
                     transitions.append((state, time))
+                    changes_in_window += start <= time <= end
                 phase = state
             if len(transitions) >= 3:
                 a, b, c = transitions[-3:]
                 if (a[0], b[0], c[0]) == ('on', 'off', 'on') and (not cycles or cycles[-1][1] != c[1]):
-                    if (start <= a[1] and c[1] <= end
-                            and all(self.config.min_phase <= d <= self.config.max_phase for d in (b[1]-a[1], c[1]-b[1]))):
-                        cycles.append((a[1], c[1]))
+                    if start <= a[1] and c[1] <= end:
+                        if all(self.config.min_phase <= d <= self.config.max_phase for d in (b[1]-a[1], c[1]-b[1])):
+                            cycles.append((a[1], c[1]))
+                        elif 'model_uncertain' not in reasons:
+                            reasons.append('model_uncertain')
         blink = len(cycles) >= self.config.min_cycles
+        if changes_in_window and not blink:
+            reasons.append('insufficient_cycles')
         status = 'unknown' if reasons else 'blink_observed' if blink else 'no_blink_observed'
         return {'state': status, 'blink_evidence': blink, 'complete_cycles': [[str(a), str(b)] for a, b in cycles],
                 'reasons': sorted(set(reasons)), 'valid_samples': sum(s[side]['status'] == 'usable' for s in samples)}

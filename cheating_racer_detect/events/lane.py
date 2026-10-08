@@ -57,7 +57,7 @@ class LaneEngine:
             raise ValueError('Expected same-frame lanes at observed contact y')
         if lanes.ego != 'stable' or lanes.scene != 'ordinary' or not lanes.rear_view:
             return self._unknown('ego_scene_or_pose_uncertain')
-        key = vehicle.identity, lanes.road_id, lanes.boundary_ids
+        key = vehicle.identity, vehicle.detection.model_id, lanes.road_id, lanes.boundary_ids
         if reason or key != self._key:
             self.reset()
         x = (vehicle.box.x1+vehicle.box.x2)/2
