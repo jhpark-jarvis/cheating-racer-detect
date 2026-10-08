@@ -1,0 +1,73 @@
+{
+  "schema": "readme-figures-v1",
+  "created": "2026-10-08",
+  "figures": [
+    {
+      "file": "concept-scene.png",
+      "kind": "ai-generated-concept",
+      "sha256": "4b95d915ecac330def0441d7e7182fe8b874fb18279c9976e0b6a3bbffb88c6e",
+      "generator": "built-in image_gen",
+      "prompt": "Use case: scientific-educational\nAsset type: original explanatory figure for a Korean research-project README, landscape\nPrimary request: a crisp publication-quality concept illustration of offline dashcam review, arranged as three balanced panels on a white background.\nPanel A: stylized realistic daylight front dashcam view of a three-lane road, rear of two anonymous cars visible; one car partially crosses a dashed lane boundary. No license plate characters or identifiable locations.\nPanel B: one rear-vehicle crop and a short abstract sequence of amber lamp observations, with an occluded frame visibly gray rather than declared off. This is a concept, NOT a measured result.\nPanel C: a person-free minimal review monitor showing a timeline, selected interval and two separate outputs representing annotated preview and original clip.\nStyle/medium: restrained academic illustration, accurate road perspective, navy lines, teal and amber accents, clean readable sans serif, generous margins, no ornamental branding.\nText (verbatim): heading \"OFFLINE DASHCAM REVIEW\"; panel labels \"A  OBSERVATION\", \"B  TEMPORAL CONTEXT\", \"C  HUMAN REVIEW\"; footer \"CONCEPT ILLUSTRATION - NOT A DETECTION RESULT\".\nConstraints: English labels only, no accuracy percentages, no police, no accusation, no real footage or identifiable people, no logos, no watermark; no invented experimental charts. Wide 16:9 composition with readable labels at README width.",
+      "scope": "Explanatory concept, not footage, model output, UI implementation or evaluation evidence."
+    },
+    {
+      "file": "pipeline.png",
+      "kind": "ai-generated-method-overview",
+      "sha256": "37b597c9829933b125abc0f1d89b4a6873d1b2f0bb69f521465e18c1f19bf67d",
+      "generator": "built-in image_gen",
+      "prompt": "Use case: infographic-diagram\nAsset type: original research-method overview figure, landscape, GitHub README\nPrimary request: a clean publication-quality two-row architecture infographic on white, with generous margins and large legible English typography. It must clearly distinguish implemented library APIs from unimplemented future event analysis.\nTop row titled \"IMPLEMENTED LIBRARY PATH\": six simple illustrated boxes connected by solid navy arrows, labels exactly \"Source PTS\", \"Detector interface\", \"Same-frame batch\", \"VFR tracker\", \"Coded review\", \"Preview + clip\". Small supporting labels respectively \"FFmpeg\", \"Caller supplied\", \"Original coordinates\", \"OpenCV\", \"Observation / prediction\", \"MP4 + time mapping\". Detector interface means model injected by caller, not automatic bundled detection.\nBottom row titled \"PLANNED EVENT ANALYSIS\": four gray outlined boxes connected by dashed gray arrows, labels \"Lane-change candidate\", \"Lamp ROI sequence\", \"Usable / unknown\", \"Human validation\". A dashed branch descends from the VFR tracker box to the bottom row; no arrow claims those parts are implemented.\nFooter text exactly \"Local processing | Exact source time | Not a violation decision\".\nStyle: minimalist academic method diagram, navy for implemented path, amber for uncertain observation icon, gray for planned work; a few tasteful road/camera/batch/timeline/review/file miniature illustrations; no decorative gradients.\nConstraints: no accuracy metrics, no actual vehicle detections, no logos, no watermark, no dense unreadable text, no fake paper citation. Wide 16:9 image. Both row titles and all six top labels / four bottom labels must be correct and readable.",
+      "scope": "Solid path: implemented library APIs. Dashed path: planned event analysis. Icons and times are illustrative."
+    },
+    {
+      "file": "observed.png",
+      "kind": "actual-synthetic-render",
+      "sha256": "1524af1da04142e00815691b99d08115efa314dccdbf562c6eba31ee67e4e314",
+      "fixture": "tests/fixtures.py",
+      "renderer": "cheating_racer_detect/review/overlay.py",
+      "source_revision": "f47bbb7f92fd76fb955e0b365e131225a5ce452e",
+      "frame": {
+        "profile": "cfr",
+        "ordinal": 2,
+        "pts": 2048,
+        "time_base": "1/10240",
+        "normalized_time": "1/5"
+      },
+      "scope": "Actual rendered image from deterministic pattern video and scripted post-NMS boxes; NOT model detections or driving accuracy."
+    },
+    {
+      "file": "prediction.png",
+      "kind": "actual-synthetic-render",
+      "sha256": "838bdb2e0ce2cc527eb12f25db27d0430ad444b51fd4e693f8ae84d46503bb6b",
+      "fixture": "tests/fixtures.py",
+      "renderer": "cheating_racer_detect/review/overlay.py",
+      "source_revision": "f47bbb7f92fd76fb955e0b365e131225a5ce452e",
+      "frame": {
+        "profile": "cfr",
+        "ordinal": 3,
+        "pts": 3072,
+        "time_base": "1/10240",
+        "normalized_time": "3/10"
+      },
+      "scope": "Actual native predicted position with no current vehicle observation; age 1/10 second. Scripted synthetic input, not detector accuracy."
+    },
+    {
+      "file": "ambiguity.png",
+      "kind": "actual-synthetic-render",
+      "sha256": "f9bfa87c64e4c7ff6f4edde0dc3099b5bd9b42b33e5f50225f64ce76938f5a8c",
+      "renderer": "cheating_racer_detect/review/overlay.py",
+      "source_revision": "f47bbb7f92fd76fb955e0b365e131225a5ce452e",
+      "frame": {
+        "profile": "scripted-ambiguity",
+        "ordinal": 1,
+        "pts": 1,
+        "time_base": "1/10",
+        "normalized_time": "1/10"
+      },
+      "scope": "Actual render of two identical class-2 detections and a separate class-5 observation; ambiguous raw boxes carry no identity. Not a real vehicle event."
+    }
+  ],
+  "notes": [
+    "Original explanatory assets; no third-party paper figures copied.",
+    "Generated concepts are not scientific evidence. Captions distinguish synthetic experiments, implemented APIs and planned algorithms."
+  ]
+}
