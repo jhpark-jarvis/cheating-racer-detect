@@ -61,6 +61,7 @@ def export_candidate(input_path, candidate, output_path, observe, *, pre, post, 
         end = min(duration, candidate.completion[1].time+post)
         if end <= candidate.completion[1].time:
             raise AppError('INVALID_CANDIDATE', '후보 완료 프레임의 길이를 확인하지 못했습니다.')
+        requested_context = [str(start), str(end)]
         lamp = None
         if lamps is not None:
             if lamps.identity is not None and lamps.identity != candidate.identity:
@@ -68,6 +69,13 @@ def export_candidate(input_path, candidate, output_path, observe, *, pre, post, 
             for frame in lamps.frames():
                 validate_frame(frame, source_hash, video, timeline, rotation)
             lamp = lamps.report(start, end)
+            # Inclusive lamp windows may bracket a boundary with a frame just
+            # outside the requested half-open clip. Include those evidence pixels
+            # too, without changing the configured lamp window or claiming coverage.
+            for sample in lamp['samples']:
+                item = timeline.frames[sample['vehicle']['frame']['ordinal']]
+                start = min(start, (item.pts-timeline.frames[0].pts)*timeline.time_base)
+                end = max(end, (item.pts+item.duration-timeline.frames[0].pts)*timeline.time_base)
         stage = Path(tempfile.mkdtemp(prefix='.crd-candidate-', suffix='.partial', dir=output.parent))
         owner = _identity(stage)[:2]
         seen = set()
@@ -84,6 +92,7 @@ def export_candidate(input_path, candidate, output_path, observe, *, pre, post, 
             raise AppError('INVALID_CANDIDATE', '후보와 클립의 원본 관측이 일치하지 않습니다.')
         result = {'schema': 'experimental-candidate-bundle-v1', 'status': 'complete',
                   'candidate': candidate.report(), 'context': [str(start), str(end)],
+                  'requested_context': requested_context,
                   'lamp': lamp, 'signal_state': 'unknown' if lamp is None else lamp['signal_state'],
                   'review': 'media/review.mp4', 'original_clip': 'media/original/clip.mp4',
                   'time_mapping': 'media/review.json', 'source_sha256': source_hash,

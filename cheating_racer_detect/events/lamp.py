@@ -122,7 +122,7 @@ class LampEngine:
             self.reset()
             self._reason = 'identity_uncertain'
         sample = {'frame': frame, 'left': self._roi(vehicle, pixels, left),
-                  'right': self._roi(vehicle, pixels, right), 'vehicle': vehicle.report()}
+                  'right': self._roi(vehicle, pixels, right), 'vehicle': vehicle}
         self._samples.append(sample)
         self._previous, self._identity, self._model = frame, vehicle.identity, vehicle.detection.model_id
         return {'status': 'recorded', 'reason': self._reason, 'sample_count': len(self._samples)}
@@ -192,8 +192,9 @@ class LampEngine:
         return {'schema': 'experimental-lamp-window-v1', 'window': [str(start), str(end)],
                 'identity': None if self._identity is None else list(self._identity), 'identity_status': 'unverified',
                 'signal_state': state, 'left': left, 'right': right, 'history_start_reason': self._reason,
-                'config': self.config.report(), 'samples': [{'vehicle': s['vehicle'],
-                    **{side: {**s[side], 'brightness': None if s[side]['brightness'] is None else str(s[side]['brightness'])}
+                'config': self.config.report(), 'samples': [{'vehicle': s['vehicle'].report(),
+                    **{side: {**s[side], 'roi': None if s[side]['roi'] is None else list(s[side]['roi']),
+                              'brightness': None if s[side]['brightness'] is None else str(s[side]['brightness'])}
                        for side in ('left', 'right')}} for s in samples],
                 'limits': ['provided ROI/visibility/signal-semantic gates', 'brightness pattern, not signal recognition',
                            'no_blink only within configured observed window', 'not a violation decision']}

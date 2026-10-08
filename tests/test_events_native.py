@@ -41,6 +41,10 @@ class Native(unittest.TestCase):
             for pair in (candidate.start, candidate.crossing, candidate.completion):
                 for frame in pair:
                     self.assertIn(frame.report(), actual)
+            for sample in result['lamp']['samples']:
+                self.assertIn(sample['vehicle']['frame'], actual)
+            self.assertEqual(result['requested_context'], ['3/10', '8/5'])
+            self.assertEqual(result['context'], ['3/10', '17/10'])
             self.assertEqual([s['codec_type'] for s in probe(TOOLS, output/'media'/'review.mp4')['streams']], ['video'])
             self.assertEqual(sha256(source), before)
             self.assertEqual(list(root.glob('.crd-candidate-*.partial')), [])

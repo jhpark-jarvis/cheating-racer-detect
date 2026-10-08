@@ -123,7 +123,7 @@ review-001/
 
 [램프 엔진](cheating_racer_detect/events/lamp.py)은 실제 관측 bbox 안의 좌/우 ROI에서 원본 BGR 밝기와 완전한 on→off→on 주기를 분석합니다. 가시성·좌우·방향지시등 의미는 주입 조건이지 밝기만으로 인식한 결과가 아닙니다. 충분한 설정 창에서만 `no_blink_observed`를 허용하고, 가림·작은 ROI·불완전 주기·부족한 이력은 `unknown`으로 남깁니다. 일부 점멸 사실과 나머지 구간의 unknown은 함께 보존합니다. 모든 임계치는 명시적 실험 설정이며 실차 교정값이 아닙니다.
 
-[후보 내보내기](cheating_racer_detect/events/export.py)는 후보의 원본·PTS·차량 관측을 실제 클립과 대조하고 아래 묶음을 한 번에 확정합니다. 좌우 점멸이나 미관측 결과를 법적 위반으로 변환하지 않습니다.
+[후보 내보내기](cheating_racer_detect/events/export.py)는 후보의 원본·PTS·차량 관측을 실제 클립과 대조하고 아래 묶음을 한 번에 확정합니다. 램프 창의 경계 관측도 클립에 포함하며 요청 맥락과 실제 포함 구간을 구분합니다. 좌우 점멸이나 미관측 결과를 법적 위반으로 변환하지 않습니다.
 
 ```text
 candidate-001/
@@ -198,8 +198,8 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 196개 PASS | CLI·추적·검토·사건 계약·평가기·그림 출처 검사 |
-| 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→13프레임 검토/원본 클립·동일 원본 PTS |
+| 공개 테스트 | 197개 PASS | CLI·추적·검토·사건 계약·평가기·그림 출처 검사 |
+| 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |

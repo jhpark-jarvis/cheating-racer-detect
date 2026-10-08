@@ -130,6 +130,16 @@ class Lamps(unittest.TestCase):
         self.assertEqual(engine.report(F(0), F(9, 10))['signal_state'], 'unknown')
         self.assertEqual(len(engine.frames()), 1)
 
+    def test_report_is_owned_and_cannot_change_history(self):
+        engine = self.sequence([20]*9)
+        before = engine.report(F(0), F(4, 5))
+        changed = engine.report(F(0), F(4, 5))
+        changed['samples'][0]['vehicle']['frame']['pts'] = 999
+        changed['samples'][0]['vehicle']['identity'][0] = 999
+        changed['samples'][0]['left']['roi'][0] = 999
+        changed['config']['min_window'] = '0'
+        self.assertEqual(engine.report(F(0), F(4, 5)), before)
+
     def test_policy_bounds_cycle_durations_hysteresis_and_sample_bound(self):
         for change in ({'off_threshold': 180}, {'on_threshold': float('nan')}, {'min_cycles': True},
                        {'min_pixels': 65537}, {'min_phase': F(2)}, {'min_window': .3}):
