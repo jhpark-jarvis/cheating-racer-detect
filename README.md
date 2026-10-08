@@ -49,10 +49,10 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 시각은 평균 FPS가 아니라 정수 PTS와 time base로 정의합니다.
 
-$$
+```math
 t_i=(\mathrm{PTS}_i-\mathrm{PTS}_0)\,\mathrm{time\_base},\qquad
 \Delta t_i=t_i-t_{i-1}.
-$$
+```
 
 `Frame`은 원본·스트림·디코딩 순서·PTS·첫 PTS·coded 크기·회전을 함께 보유합니다. 좌표는 원본 coded raster의 연속 half-open `xyxy`이며 display rotation은 분석 좌표에 적용하지 않고 메타데이터로 표시합니다.
 
@@ -62,10 +62,10 @@ $$
 
 운동 상태는 중심·로그 크기와 초당 속도로 구성합니다.
 
-$$
+```math
 z=[c_x,c_y,\log w,\log h]^T,\quad x=[z,\dot z]^T,\quad
 A(\Delta t)=\begin{bmatrix}I_4&\Delta t I_4\\0&I_4\end{bmatrix}.
-$$
+```
 
 과정 잡음은 채널별 spectral density `q`에 대해 `q·dt³/3`, `q·dt²/2`, `q·dt` 블록을 사용합니다. 행렬은 프로젝트가 구성하고 수치 예측/보정은 OpenCV `KalmanFilter` API를 호출합니다. [운동 구현](cheating_racer_detect/tracking/motion.py), [OpenCV 공식 문서](https://docs.opencv.org/4.11.0/dd/d6a/classcv_1_1KalmanFilter.html)
 
