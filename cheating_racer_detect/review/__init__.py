@@ -2,5 +2,6 @@
 
 from .records import summarize
 from .overlay import render
+from .video import export_review
 
-__all__ = ["summarize", "render"]
+__all__ = ["summarize", "render", "export_review"]
