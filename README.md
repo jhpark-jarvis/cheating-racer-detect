@@ -9,10 +9,10 @@
 | --- | --- | --- |
 | Python | CLI·작업 제어·원본/결과 기록 | 사용 중 |
 | FFmpeg / ffprobe | 영상 정보·시간축 분석, 디코딩·클립 추출 | 사용 중 |
-| OpenCV | 프레임·차량 ROI 전처리, 가변 시간 간격 움직임 예측 | 추적 모듈 합성 검증 |
+| OpenCV | 프레임 처리, 가변 시간 간격 움직임 예측·검토 오버레이 | 연결·표시 모듈 합성 검증 |
 | PyTorch | 차량·차선 분석 모델의 추론 기반 | 차량 탐지 합성 검증 |
 
-차량 탐지는 YOLOX-s를 실험 중이며 최종 모델은 미정입니다. 추적은 OpenCV 움직임 예측과 독립 관측 연결·ID 관리 모듈을 제공합니다.
+차량 탐지는 YOLOX-s를 실험 중이며 최종 모델은 미정입니다. 모델 독립 탐지·추적 연결, 독립 ID 관리와 검토 오버레이를 라이브러리로 제공합니다.
 
 ## 구현 방향
 
@@ -58,7 +58,27 @@ HEVC·HDR·데이터/자막/다중 영상 트랙·분할 파일 결합 및 네�
 `Tracker.update(frame, detections)`에는 원본 시각을 담은 `Frame`, 같은 프레임의 `Detection`, 명시적인 `Policy`가 필요합니다.
 좌표는 원본 coded raster의 half-open xyxy이며 회전은 메타데이터로 유지합니다. 정책 수치는 실제 차량 평가로 정해야 합니다.
 
-추적 모듈에만 NumPy/OpenCV가 필요합니다. 별도 Python 환경에서 `python -m pip install ".[tracking]"`으로 준비할 수 있으며 기존 클립 CLI에는 필요하지 않습니다.
+탐지·추적 연결과 오버레이 렌더링에는 NumPy/OpenCV가 필요합니다. 별도 Python 환경에서 `python -m pip install ".[tracking]"`으로 준비할 수 있으며 기존 클립 CLI에는 필요하지 않습니다. 계약·검토 요약은 표준 라이브러리만 사용합니다.
+
+### 분석 라이브러리
+
+[탐지 연결](cheating_racer_detect/analysis/bridge.py)은 호출자가 제공한 탐지기를 사용합니다. `detector.detect(frame, image)`는 현재 `Frame`·원본 좌표의 `DetectorObservation`·`Letterbox`·모델 식별자를 담은 `DetectorBatch`를 반환해야 합니다. 입력은 같은 디코딩에서 얻은 BGR bytes, 탐지기에 전달되는 배열은 읽기 전용입니다. 현재 연결은 축 1024 이하·640×640 letterbox·프레임당 탐지 64개 이하로 제한합니다.
+
+```python
+from cheating_racer_detect.analysis import DetectorTrackerBridge
+from cheating_racer_detect.tracking import Tracker
+from cheating_racer_detect.review import render
+
+# detector, policy, frame, bgr_bytes는 호출자가 준비합니다.
+bridge = DetectorTrackerBridge(detector, Tracker(policy),
+    model_alias="vehicle-model-v1", expected_detector_id=detector.model_id)
+result = bridge.update(frame, bgr_bytes)
+preview_bgr, review = render(frame, bgr_bytes, result["tracking"])
+```
+
+모델 공간의 YOLOX 형식 Nx7 결과에는 `post_nms_observations`를 한 번 적용합니다. 이미 원본 좌표인 박스에는 적용하지 않습니다. 모델 로딩·다운로드·영상 디코딩·파일 저장은 호출자 책임이며 자동으로 수행하지 않습니다.
+
+[검토 오버레이](cheating_racer_detect/review/overlay.py)는 실제 관측을 실선, 위치 예측을 점선, 모호한 탐지를 ID 없이 표시합니다. 원본 시각과 개별 관측 목록을 함께 제공하며, 화면은 원본 coded raster 기준이고 회전 정보는 적용하지 않고 표시합니다. ID는 검증된 신원이 아니며 예측·모델 점수는 점멸 근거나 위반 확률이 아닙니다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
