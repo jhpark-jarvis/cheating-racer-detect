@@ -66,6 +66,16 @@
       "scope": "Actual render of two identical class-2 detections and a separate class-5 observation; ambiguous raw boxes carry no identity. Not a real vehicle event."
     }
   ],
+  "diagrams": [
+    {
+      "file": "input-replay.svg",
+      "kind": "original-implementation-diagram",
+      "created": "2026-10-10",
+      "sha256": "a1a16e8825eda7a6979fe3f55feecfe27087287f4bcbaa406eb1131dff81024a",
+      "source": ["cheating_racer_detect/events/inputs.py", "cheating_racer_detect/events/replay.py"],
+      "scope": "Directly authored vector diagram of implemented source/PTS verification, recorded-input replay and atomic output. Not footage, detection output, performance evidence or a GUI."
+    }
+  ],
   "notes": [
     "Original explanatory assets; no third-party paper figures copied.",
     "Generated concepts are not scientific evidence. Captions distinguish synthetic experiments, implemented APIs and planned algorithms."

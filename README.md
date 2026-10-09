@@ -136,6 +136,23 @@ candidate-001/
 
 [평가기](cheating_racer_detect/events/evaluate.py)는 명시적인 차량 대응표·시간 허용치로 최대 매칭 수를 구한 뒤 전체 시간 거리 합을 최소화합니다. 중복은 FP, 평가 가능한 정답의 미탐/보류는 FN이며 방향과 시간 오차를 따로 기록합니다. 실제 GT·정량 기준은 아직 확정하지 않았습니다.
 
+### 3.6 Source-verified input replay
+
+![원본 검증·주입 입력 재생·결과 확정의 구현 흐름](assets/figures/input-replay.svg)
+
+*Figure 6. 직접 작성한 구현 도식. 저장된 입력과 실제 원본 프레임을 대조한 뒤 새 사건 엔진으로 재생합니다. 자동 모델·실차 탐지 결과·정확도 그래프가 아닙니다.*
+
+[입력 기록](cheating_racer_detect/events/inputs.py)은 선택 차량의 실제 관측/미관측, 차선·자차 상태, 좌우 ROI·가시성, 모든 분석 설정과 앞뒤 맥락을 보관합니다. [재생기](cheating_racer_detect/events/replay.py)는 원본 SHA-256·정수 PTS·time base·크기를 검사하고 원본 픽셀로 후보와 램프 결과를 다시 계산합니다. 타 차량이나 운동 예측을 재추적하지 않으며 빠진 프레임·가림은 `unknown`으로 유지합니다.
+
+실험용 JSON은 1 MiB·120개 입력 프레임으로 제한합니다. 중복/알 수 없는 필드·비정규 시간·비유한 수치를 거부하며, 전체 설정을 담은 canonical bytes의 해시로 실행 입력을 구분합니다. 해시는 위변조 인증이나 관측의 사실성을 보증하지 않습니다. 원본 영상은 별도로 보관해야 하며 다른 코드 버전의 동일 결과나 동일 MP4 바이트를 보장하지 않습니다.
+
+```text
+replay-001/
+├── inputs.json          # 선택 차량 관측·차선/ROI·명시 설정
+├── replay.json          # 입력/원본 해시·선택 후보 번호·제한
+└── candidate/           # candidate.json + media/review + original clip
+```
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -176,9 +193,18 @@ export_review(
 ```powershell
 python -m scripts.demo_review --profile vfr --output "D:\review-demo-001"
 python -m scripts.demo_events --output "D:\candidate-demo-001"
+python -m scripts.demo_replay --output "D:\replay-demo-001"
 python -m scripts.benchmark_events
 python -m unittest discover -s tests -v
 ```
+
+[입력 재현 데모](scripts/demo_replay.py)는 자체 합성 영상을 임시 생성하고 관측 저장→읽기→재생→클립을 검증한 뒤 임시 원본을 정리합니다. 자신의 주입 관측은 `EventInputs`로 만들고 `save_inputs(inputs, "recording-001")`로 저장합니다. 기존 원본과 저장 기록을 다시 사용하는 [명령](scripts/replay_events.py)은 다음과 같습니다(후보 번호는 0부터 시작).
+
+```powershell
+python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\recording-001\inputs.json" --candidate-index 0 --output "D:\replay-001"
+```
+
+`inputs.json`은 영상만으로 자동 생성되지 않습니다. 호출자가 검증된 `InputFrame` 관측과 명시 설정을 제공해야 하며 재생에 선택 의존성과 FFmpeg가 필요합니다.
 
 ### Input and resource limits
 
@@ -188,6 +214,7 @@ python -m unittest discover -s tests -v
 | 클립 구간 | 첫 원본 비디오 PTS 기준 `[start,end)`·CFR/VFR·시작 offset·90도 단위 회전 |
 | 분석 연결 | 원본 축 ≤1024·640×640 letterbox·프레임당 탐지 ≤64 |
 | 검토 MP4 | 선택 프레임 ≤120·원본 축 ≤1024·제한된 time base·무음 coded view·고정 짝수 캔버스 |
+| 입력 재생 | 한 차량·JSON ≤1 MiB·입력/디코딩 구간 ≤120프레임·단일 원본/시간축 |
 | 결과/복구 | 원본·기존 결과 덮어쓰기 금지·오류/취소 시 소유 임시 자원 정리 |
 
 HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네트워크/재분석 지점·상위 경로(`..`)는 지원하지 않습니다. 마지막 포함 프레임의 표시 길이는 요청 끝을 넘을 수 있습니다. 강제 종료 후에는 해당 작업의 `.crd-*.partial`만 확인하고 새 이름으로 재시도하세요. 현재 전체 원본을 여러 번 읽고 디코딩하므로 장시간 성능은 검증이 필요합니다.
@@ -198,8 +225,9 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 197개 PASS | CLI·추적·검토·사건 계약·평가기·그림 출처 검사 |
+| 공개 테스트 | 218개 PASS | CLI·추적·검토·사건/입력 재생 계약·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
+| 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="370" viewBox="0 0 1200 370" role="img" aria-labelledby="title desc">
+  <title id="title">Source-verified event replay</title>
+  <desc id="desc">An original MP4 and recorded caller inputs meet at SHA256 and exact frame validation. Fresh lane and lamp engines read original pixels. A single transaction preserves inputs, replay metadata, and the selected candidate with review and original clips. Missing or unusable observations remain unknown. This is an implementation diagram, not accuracy evidence.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#254a62"/></marker>
+  </defs>
+  <rect width="1200" height="370" rx="16" fill="#f5f8fa"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#173449">
+    <text x="34" y="42" font-size="25" font-weight="700">SOURCE-VERIFIED EVENT REPLAY</text>
+    <text x="34" y="66" font-size="15" fill="#526a7a">Recorded caller inputs + original pixels · no re-tracking or interpolation</text>
+    <g stroke="#254a62" stroke-width="2" fill="#fff">
+      <rect x="34" y="96" width="224" height="80" rx="10"/>
+      <rect x="34" y="207" width="224" height="91" rx="10"/>
+      <rect x="334" y="96" width="224" height="202" rx="10"/>
+      <rect x="634" y="96" width="224" height="202" rx="10"/>
+      <rect x="934" y="96" width="232" height="202" rx="10"/>
+    </g>
+    <g stroke="#254a62" stroke-width="2.5" fill="none" marker-end="url(#arrow)">
+      <path d="M258 136 H294 V176 H326"/>
+      <path d="M258 250 H294 V222 H326"/>
+      <path d="M558 197 H626"/>
+      <path d="M858 197 H926"/>
+    </g>
+    <g font-size="20" font-weight="700">
+      <text x="52" y="128">Original MP4</text>
+      <text x="52" y="240">inputs.json</text>
+      <text x="352" y="131">Verify source</text>
+      <text x="652" y="131">Fresh engines</text>
+      <text x="952" y="131">Atomic bundle</text>
+    </g>
+    <g font-size="16" fill="#435f70">
+      <text x="52" y="155">Read-only source pixels</text>
+      <text x="52" y="264">Vehicle / lanes / ROI</text>
+      <text x="52" y="285">Explicit settings / PTS</text>
+      <text x="352" y="167">SHA256 match</text>
+      <text x="352" y="194">PTS + time base</text>
+      <text x="352" y="221">Coded frame geometry</text>
+      <text x="352" y="270" fill="#b45309">Mismatch → reject</text>
+      <text x="652" y="167">Lane-change brackets</text>
+      <text x="652" y="194">Original ROI brightness</text>
+      <text x="652" y="221">Selected actual vehicle</text>
+      <text x="652" y="270" fill="#b45309">Missing → unknown</text>
+      <text x="952" y="167">inputs.json + replay.json</text>
+      <text x="952" y="194">Selected candidate</text>
+      <text x="952" y="221">Review + original clip</text>
+      <text x="952" y="270" fill="#00786e">All publish, or none</text>
+    </g>
+    <text x="34" y="340" font-size="15" fill="#526a7a">Implementation diagram · identity unverified · content hash ≠ authentication · not a violation decision</text>
+  </g>
+</svg>
