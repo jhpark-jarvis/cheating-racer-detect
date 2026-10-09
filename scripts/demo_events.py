@@ -48,9 +48,14 @@ def observation():
     return observe
 
 
-def analyze(source, tools, root):
-    lane = LaneEngine(LaneConfig('synthetic-event-v1', .15, F(1, 5), F(3, 10), 10.))
-    lamp = LampEngine(LampConfig('synthetic-event-v1', 50., 180., 8, F(3, 5), F(3, 10), F(1, 10), F(1), 1))
+def event_configs():
+    return (LaneConfig('synthetic-event-v1', .15, F(1, 5), F(3, 10), 10.),
+            LampConfig('synthetic-event-v1', 50., 180., 8, F(3, 5), F(3, 10), F(1, 10), F(1), 1))
+
+
+def analyze(source, tools, root, *, capture=None):
+    lane_config, lamp_config = event_configs()
+    lane, lamp = LaneEngine(lane_config), LampEngine(lamp_config)
     video, timeline, frames, first, rotation = prepare(source, Decimal(0), Decimal('2.4'), tools)
     raw = root/'decoded.bgr'
     run_tool([tools.ffmpeg, '-nostdin', '-v', 'error', '-noautorotate', '-i', source,
@@ -70,11 +75,24 @@ def analyze(source, tools, root):
             if event is not None:
                 events.append(event)
             x = POSITIONS[n]
-            lamp.update(frame, vehicle, pixels, LampROI(Box(x-8, 20, x-4, 24), 'usable'),
-                        LampROI(Box(x+4, 20, x+8, 24), 'usable'))
+            left, right = (LampROI(Box(x-8, 20, x-4, 24), 'usable'),
+                           LampROI(Box(x+4, 20, x+8, 24), 'usable'))
+            lamp.update(frame, vehicle, pixels, left, right)
+            if capture is not None:
+                from cheating_racer_detect.events.inputs import InputFrame
+                capture(InputFrame(frame, vehicle, section, left, right))
     if len(events) != 1:
         raise ValueError('Synthetic fixture expected exactly one adjacent change')
     return events[0], lamp
+
+
+def capture_inputs(source, tools, root):
+    """Explicit synthetic settings + selected actual native-Tracker observations."""
+    from cheating_racer_detect.events.inputs import EventInputs
+    rows = []
+    candidate, _lamps = analyze(source, tools, root, capture=rows.append)
+    lane, lamp = event_configs()
+    return EventInputs(lane, lamp, F(1, 5), F(2, 5), candidate.identity, tuple(rows))
 
 
 def demonstrate(output, tools=None):
