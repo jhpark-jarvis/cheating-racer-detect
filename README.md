@@ -153,6 +153,12 @@ replay-001/
 └── candidate/           # candidate.json + media/review + original clip
 ```
 
+### 3.7 Job-scoped source inspection
+
+[원본 검사](cheating_racer_detect/source.py)는 한 동기 작업의 중첩 호출에서만 메타데이터와 immutable PTS 시간축을 재사용합니다. 경로·파일 식별자·크기·수정 시각을 매번 확인하고, 다른 원본/도구에는 재사용하지 않습니다. 작업 종료·오류·취소 때 기록을 폐기하며 다음 작업은 다시 검사합니다. 컨테이너의 외부 참조 거부, 원본 SHA-256 대조, 완전 디코딩과 파생 영상의 독립 PTS 검증은 생략하지 않습니다.
+
+파일 fingerprint는 내용 인증이 아닙니다. 같은 크기·수정 시각으로 내용을 바꾼 경우에도 결과 확정 전 SHA-256 검사에서 거부합니다. 영속 캐시나 장시간 streaming 구현은 아닙니다.
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -194,6 +200,7 @@ export_review(
 python -m scripts.demo_review --profile vfr --output "D:\review-demo-001"
 python -m scripts.demo_events --output "D:\candidate-demo-001"
 python -m scripts.demo_replay --output "D:\replay-demo-001"
+python -m scripts.benchmark_events --no-reuse
 python -m scripts.benchmark_events
 python -m unittest discover -s tests -v
 ```
@@ -225,9 +232,10 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 218개 PASS | CLI·추적·검토·사건/입력 재생 계약·평가기·그림 출처 검사 |
+| 공개 테스트 | 234개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사 재사용·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
+| 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |
@@ -235,6 +243,8 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 | 실패/복구 | 입력·기록·native/encode 실패·취소·출력 충돌·재시도 | 원본/기존 결과 보존과 소유 임시 자원 정리 |
 
 FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어집니다. skip이 있는 실행을 전체 검증으로 볼 수 없습니다. 수동 플레이어·사용자 터미널·업무 수락은 아직 남아 있습니다. [그림 출처와 생성 프롬프트](assets/figures/provenance.json)는 유형·해시·원본 구현 revision을 구분합니다.
+
+`benchmark_events --no-reuse`와 기본 실행은 각기 새 Python 프로세스에서 비교하세요. 2.4초 자체 합성 영상의 원본 metadata/timeline 호출은 각각 4→1회, SHA-256은 7→7회, 완전 원본 디코딩은 1→1회였습니다. 전체 파일 시간축·원본 픽셀 디코딩은 여전히 필요하며 이 호출 감소를 실영상 속도 배율이나 장시간 처리 수락으로 해석하지 않습니다.
 
 ## 6. Limitations and Planned Work
 
