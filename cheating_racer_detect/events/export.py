@@ -12,6 +12,7 @@ from ..errors import AppError
 from ..paths import destination_path, local_path, source_path
 from ..review.video import export_review, prepare
 from ..service import _identity, _publish, _sha256
+from ..source import source_job
 from ..tools import discover_tools
 from .contracts import Candidate, Vehicle, seconds
 from .lamp import LampEngine
@@ -32,6 +33,7 @@ def validate_frame(frame, source_hash, video, timeline, rotation):
         raise AppError('INVALID_CANDIDATE', '후보 관측과 원본 영상의 시간·출처가 일치하지 않습니다.')
 
 
+@source_job
 def export_candidate(input_path, candidate, output_path, observe, *, pre, post, lamps=None, toolchain=None):
     """Explicit positive pre/post seconds; all outputs publish or none do.
 

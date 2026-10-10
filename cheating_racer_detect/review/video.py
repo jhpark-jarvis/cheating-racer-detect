@@ -11,6 +11,7 @@ import tempfile
 from ..errors import AppError
 from ..paths import destination_path, local_path, source_path
 from ..service import _identity, _publish, _sha256, create_clip
+from ..source import inspect_source, source_job
 from ..tools import discover_tools, run_tool
 from ..tracking import Frame
 from .records import summarize
@@ -39,13 +40,9 @@ def timestamp_expression(ticks):
 
 
 def prepare(source, start, end, tools):
-    from ..media import _probe, _profile, _rotation, _timeline, select_frames, validate_container
+    from ..media import _rotation, select_frames
 
-    validate_container(source)
-    video, _audio = _profile(_probe(source, tools, 'UNSUPPORTED_MEDIA'), 'UNSUPPORTED_MEDIA')
-    if max(video['width'], video['height']) > MAX_AXIS:
-        raise AppError('REVIEW_LIMIT', '검토 영상은 원본 축 1024 이하를 지원합니다.')
-    timeline = _timeline(source, video, tools, 'INVALID_TIMELINE')
+    video, _audio, timeline = inspect_source(source, tools, max_axis=MAX_AXIS)
     selected = select_frames(timeline, Fraction(start), Fraction(end))
     if (len(selected) > MAX_FRAMES or timeline.time_base.denominator > 1_000_000
             or timeline.time_base.numerator > 1_000_000):
@@ -143,6 +140,7 @@ def build(source, start, end, stage, observe, tools, source_hash):
                        'last frame may extend beyond request end']}
 
 
+@source_job
 def export_review(input_path, start, end, output_path, observe, toolchain=None):
     """Observe(Frame, immutable BGR bytes) -> current Tracker report.
 

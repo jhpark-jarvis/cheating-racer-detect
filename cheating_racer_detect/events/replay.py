@@ -10,6 +10,7 @@ from ..errors import AppError
 from ..paths import local_path, source_path
 from ..review.video import prepare
 from ..service import _identity, _sha256
+from ..source import source_job
 from ..tools import discover_tools, run_tool
 from ..tracking.contracts import integer
 from .export import decimal_bound, export_candidate, validate_frame
@@ -24,6 +25,7 @@ class ReplayAnalysis:
     lamps: LampEngine
 
 
+@source_job
 def analyze_inputs(input_path, inputs, toolchain=None):
     """Fresh engines each call, <=120 decoded span frames, no interpolation."""
     try:
@@ -97,6 +99,7 @@ def recorded_observer(inputs):
     return observe
 
 
+@source_job
 def export_replay(input_path, inputs, output_path, *, candidate_index, toolchain=None):
     """Atomically publish the receipt + selected replay candidate/media bundle."""
     integer(candidate_index)

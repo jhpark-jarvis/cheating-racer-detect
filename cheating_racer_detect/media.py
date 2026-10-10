@@ -299,10 +299,8 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
     if not start.is_finite() or not end.is_finite():
         raise AppError("INVALID_RANGE", "시작·끝은 유한한 초 단위 숫자여야 합니다.")
     begin, finish = Fraction(start), Fraction(end)
-    validate_container(source)
-    info = _probe(source, toolchain, "UNSUPPORTED_MEDIA")
-    video, audio = _profile(info)
-    timeline = _timeline(source, video, toolchain, "INVALID_TIMELINE")
+    from .source import inspect_source
+    video, audio, timeline = inspect_source(source, toolchain)
     selected = select_frames(timeline, begin, finish)
     _check_codecs(toolchain, audio is not None)
     absolute_start = timeline.origin + begin

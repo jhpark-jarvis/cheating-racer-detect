@@ -13,6 +13,7 @@ from pathlib import Path
 from . import __version__
 from .errors import AppError
 from .paths import destination_path, local_path, source_path
+from .source import source_job
 from .tools import Toolchain, discover_tools, doctor
 
 
@@ -40,6 +41,7 @@ def _publish(temporary: Path, output: Path) -> None:
         raise AppError('IO_ERROR', '결과를 확정하지 못했습니다. 출력 권한과 다른 작업을 확인하세요.') from None
 
 
+@source_job
 def create_clip(input_path: str | Path, start: Decimal, end: Decimal,
                 output_path: str | Path, toolchain: Toolchain | None = None) -> dict:
     from .media import extract
