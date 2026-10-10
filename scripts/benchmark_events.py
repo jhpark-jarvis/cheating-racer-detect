@@ -5,6 +5,7 @@ Own-process peak working set excludes FFmpeg children/GPU; disk peaks sampled.
 """
 
 from collections import Counter
+import argparse
 from contextlib import ExitStack
 import ctypes
 from ctypes import wintypes
@@ -20,6 +21,7 @@ from unittest.mock import patch
 from cheating_racer_detect import media, service, tools
 from cheating_racer_detect.events import export
 from cheating_racer_detect.review import video
+from cheating_racer_detect.source import source_session
 from scripts import demo_events
 
 
@@ -92,7 +94,7 @@ def classify(args, source, toolchain):
     return ('source_' if source_read else 'derived_')+kind
 
 
-def benchmark():
+def benchmark(*, reuse=True):
     toolchain = tools.discover_tools()
     with tempfile.TemporaryDirectory(prefix='crd-event-benchmark-') as directory:
         root = Path(directory)
@@ -107,7 +109,7 @@ def benchmark():
             nonlocal hash_reads
             hash_reads += path == source
             return actual_hash(path)
-        with DiskSampler(root) as disk, ExitStack() as stack:
+        with DiskSampler(root) as disk, ExitStack() as stack, source_session(reuse=reuse):
             for module in (tools, media, video, demo_events):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=run))
             for module in (service, video, export, demo_events):
@@ -122,6 +124,7 @@ def benchmark():
         final_bytes = sum(p.stat().st_size for p in output.rglob('*') if p.is_file())
         mapping = json.loads((output/'media'/'review.json').read_text(encoding='utf-8'))
         return {'schema': 'synthetic-event-baseline-v1', 'input_seconds': '12/5',
+                'source_inspection_reuse': reuse,
                 'fixture_generation_in_wall_time': False, 'analysis_seconds': analyzed-start,
                 'candidate_export_seconds': finished-analyzed, 'wall_seconds': finished-start,
                 'wall_over_input_duration': (finished-start)/2.4,
@@ -138,4 +141,6 @@ def benchmark():
 
 
 if __name__ == '__main__':
-    print(json.dumps(benchmark(), sort_keys=True))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--no-reuse', action='store_true', help='Inspect source separately at each nested boundary')
+    print(json.dumps(benchmark(reuse=not parser.parse_args().no_reuse), sort_keys=True))
