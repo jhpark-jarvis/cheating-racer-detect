@@ -23,7 +23,7 @@
 | CLI | `doctor`, 원본 `[start,end)` 구간의 검토 클립 추출 |
 | 분석 API | 같은 프레임의 탐지 계약·가변 dt 추적·관측/예측/모호성 요약·렌더링 |
 | 검토 내보내기 | 무음 coded-view MP4·원본 클립의 음성/회전·프레임별 시각 매핑 |
-| 사건 API | 주입 차선/자차 상태 기반 후보·주입 좌우 ROI 밝기 시계열·후보 검토 클립 |
+| 사건 API | 주입 차선/자차 상태 기반 후보·좌우 ROI 시계열·단일/명시 선택 일괄 검토 클립 |
 | 후속 연구 | 자동 차선·자차 이동·램프 ROI/의미 인식·실영상 교정 |
 
 미검출을 미점등으로 해석하지 않습니다. ID는 임시 추적 식별자이지 신원 정보가 아닙니다. 모델 점수·위치 예측은 위반 확률이나 실제 점멸 관측이 아닙니다.
@@ -188,6 +188,21 @@ before publication / job exit / failure → discard owned pixel window
 
 AAC는 **모든** 샘플 블록의 PTS·샘플 수·겹침을 끝까지 검사하되 선택 구간의 첫 시작·마지막 끝·블록 수만 보관합니다. 전체 interval 목록은 만들지 않으며 샘플 단위 경계·지연 음성·priming/padding 대조는 그대로입니다. 선택 구간 이후의 잘못된 샘플도 거부합니다. [오디오 요약 시험](tests/test_audio_windows.py), [실제 픽셀·음성 대조](tests/test_window_resources_native.py)
 
+### 3.10 Explicit multi-candidate review
+
+[`export_replay_batch`](cheating_racer_detect/events/replay.py)는 저장 입력을 **한 번 재생**한 뒤 명시 선택한 후보들을 직렬로 내보냅니다. 0부터 시작하는 후보 번호와 지정 순서를 유지하며 중복·빈 선택·없는 후보는 거부합니다. 후보별 원본 해시·완전 디코딩·관측 anchor·파생 영상의 PTS 검사는 그대로 수행합니다. 자동 전체 선택이나 신호 상태에 따른 암묵적 제외는 없습니다.
+
+```text
+replay-batch-001/
+├── inputs.json          # 공통 원본 관측·설정
+├── batch.json           # 원본/입력 해시·전체/선택 수·원래 index·결과 경로
+└── candidates/
+    ├── 000000/          # candidate.json + media/review + original clip
+    └── 000001/          # 폴더 이름은 재생 결과의 원래 후보 번호
+```
+
+모든 선택 결과와 기록이 검증된 뒤 새 최종 폴더를 한 번 확정합니다. 중간 후보의 오류·취소·정리 실패에는 전체 묶음을 확정하지 않으며 기존 결과를 덮어쓰지 않습니다. 소유권이 불확실한 임시 자원은 삭제하지 않고 오류로 알립니다. 실패 후 같은 미생성 출력 이름으로 새 작업을 재시도할 수 있습니다. 후보 수만큼 출력량과 원본 검증 비용이 증가하며, 픽셀 재사용은 기존 포함 구간·정리 규칙에 한정됩니다. [원자적 확정 시험](tests/test_batch_replay.py), [실제 두 후보·명령 검증](tests/test_batch_replay_native.py)
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -229,6 +244,7 @@ export_review(
 python -m scripts.demo_review --profile vfr --output "D:\review-demo-001"
 python -m scripts.demo_events --output "D:\candidate-demo-001"
 python -m scripts.demo_replay --output "D:\replay-demo-001"
+python -m scripts.demo_batch_replay --output "D:\batch-demo-001"
 python -m scripts.benchmark_events --no-reuse
 python -m scripts.benchmark_events
 python -m scripts.benchmark_scaling --seconds 300 --window tail --no-reuse
@@ -241,7 +257,10 @@ python -m unittest discover -s tests -v
 
 ```powershell
 python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\recording-001\inputs.json" --candidate-index 0 --output "D:\replay-001"
+python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\recording-001\inputs.json" --candidate-indices 1 0 --output "D:\replay-batch-001"
 ```
+
+두 선택 옵션은 함께 사용할 수 없습니다. 후보 번호는 `analyze_inputs(source, inputs).candidates`의 순서입니다. 일괄 API의 `candidate_indices`는 중복 없는 정수 list/tuple(1~120개)이며, CLI도 같은 선택 규칙을 적용합니다. [일괄 합성 데모](scripts/demo_batch_replay.py)는 자체 44프레임 영상의 우측→좌측 변경과 좌우 점멸을 주입해 저장/읽기/재생/두 클립을 연결합니다. 차량 탐지 모델의 결과나 실제 사건 정답이 아닙니다.
 
 `inputs.json`은 영상만으로 자동 생성되지 않습니다. 호출자가 검증된 `InputFrame` 관측과 명시 설정을 제공해야 하며 재생에 선택 의존성과 FFmpeg가 필요합니다.
 
@@ -258,6 +277,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 | 분석 연결 | 원본 축 ≤1024·640×640 letterbox·프레임당 탐지 ≤64 |
 | 검토 MP4 | 선택 프레임 ≤120·원본 축 ≤1024·제한된 time base·무음 coded view·고정 짝수 캔버스 |
 | 입력 재생 | 한 차량·JSON ≤1 MiB·입력/디코딩 구간 ≤120프레임·단일 원본/시간축 |
+| 일괄 내보내기 | 명시 후보 번호 1~120개·직렬 처리·각 후보의 기존 검토 한계·전체 확정 또는 전체 실패 |
 | 시간축 | 전체 프레임 순차 검사·일반 경로 16바이트/프레임 보관, 영상 길이 상한/일정 RAM 보장 아님 |
 | 결과/복구 | 원본·기존 결과 덮어쓰기 금지·오류/취소 시 소유 임시 자원 정리 |
 
@@ -269,9 +289,10 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 291개 PASS | CLI·추적·검토·사건/입력 재생·원본/구간 자원·평가기·그림 출처 검사 |
+| 공개 테스트 | 310개 PASS | CLI·추적·검토·사건/단일·일괄 재생·원본/구간 자원·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
+| 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
