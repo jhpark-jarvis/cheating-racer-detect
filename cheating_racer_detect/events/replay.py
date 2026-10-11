@@ -3,18 +3,17 @@
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR
 import json
-from pathlib import Path
 
 from ..errors import AppError
 from ..paths import local_path, source_path
 from ..pixels import pixel_window
 from ..review.video import prepare
 from ..service import _identity, _sha256
-from ..source import source_job
+from ..source import release_pixels, source_job
 from ..tools import discover_tools
 from ..tracking.contracts import integer
 from .export import decimal_bound, export_candidate, validate_frame
-from .inputs import EventInputs, owned_output, write_bytes
+from .inputs import EventInputs, MAX_ROWS, owned_output, write_bytes
 from .lane import LaneEngine
 from .lamp import LampEngine
 
@@ -120,3 +119,62 @@ def export_replay(input_path, inputs, output_path, *, candidate_index, toolchain
         if before != _identity(source) or source_hash != _sha256(source):
             raise AppError('INPUT_CHANGED', '처리 중 원본 영상이 변경되었습니다.')
     return result
+
+
+def _selection(value):
+    # Only bounded materialized sequences: no unbounded iterators or ambiguous
+    # ordering. Snapshot mutable lists before analysis or caller callbacks run.
+    if (type(value) not in (list, tuple) or not 1 <= len(value) <= MAX_ROWS
+            or any(type(index) is not int or index < 0 for index in value)
+            or len(set(value)) != len(value)):
+        raise AppError('INVALID_SELECTION', '중복 없이 0 이상의 후보 번호를 1~120개 지정하세요.')
+    return tuple(value)
+
+
+@source_job
+def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, toolchain=None):
+    """Analyze once; publish all explicitly selected bundles or none.
+
+    Caller order and zero-based replay indices are preserved. Empty, duplicate
+    or invalid selections fail; no implicit all-candidates or partial success.
+    Each candidate still runs its original full media/hash/output checks.
+    """
+    indices = _selection(candidate_indices)
+    if not isinstance(inputs, EventInputs):
+        raise AppError('INVALID_INPUTS', '검증된 관측 입력이 필요합니다.')
+    from ..paths import destination_path
+    source = source_path(input_path)
+    destination_path(output_path, source)
+    tools = toolchain or discover_tools()
+    try:
+        before, source_hash = _identity(source), _sha256(source)
+        analysis = analyze_inputs(source, inputs, tools)
+        if any(index >= len(analysis.candidates) for index in indices):
+            raise AppError('INVALID_CANDIDATE', '재생 결과에 해당 후보가 없습니다. 모든 후보 번호를 확인하세요.')
+        with owned_output(output_path) as stage:
+            write_bytes(stage/'inputs.json', inputs.to_bytes())
+            (stage/'candidates').mkdir()
+            entries = []
+            for index in indices:
+                candidate = analysis.candidates[index]
+                relative = f'candidates/{index:06d}'
+                bundle = export_candidate(source, candidate, stage/relative, recorded_observer(inputs),
+                                          pre=inputs.pre, post=inputs.post, lamps=analysis.lamps, toolchain=tools)
+                entries.append({'candidate_index': index, 'candidate': relative+'/candidate.json',
+                                'direction': candidate.direction, 'signal_state': bundle['signal_state']})
+            result = {'schema': 'experimental-event-replay-batch-v1', 'status': 'complete',
+                      'inputs': 'inputs.json', 'inputs_sha256': inputs.sha256, 'source_sha256': source_hash,
+                      'candidate_count': len(analysis.candidates), 'selected_count': len(indices),
+                      'candidate_indices': list(indices), 'candidates': entries,
+                      'limits': ['caller-recorded inputs, not ground truth',
+                                 'selected actual vehicle only; no re-tracking', 'identity unverified',
+                                 'content hash is not authentication', 'not a violation decision',
+                                 'all selected candidates or none; no partial success']}
+            write_bytes(stage/'batch.json', (json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)+'\n').encode('utf-8'))
+            local_path(source)
+            if before != _identity(source) or source_hash != _sha256(source):
+                raise AppError('INPUT_CHANGED', '처리 중 원본 영상이 변경되었습니다.')
+            release_pixels()  # Cleanup errors must precede the outer final publish.
+        return result
+    except OSError:
+        raise AppError('IO_ERROR', '원본 접근 권한과 출력 저장 공간을 확인하세요.') from None
