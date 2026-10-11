@@ -181,10 +181,10 @@ PTS/duration은 일반 경로에서 프레임당 16바이트의 immutable 데이
 source validation → selected coded pixels on disk → event analysis
                               └─ contained range → review rendering
 source hash + complete clip decode + independent output checks → publish
-job exit / failure / cancellation → discard owned pixel window
+before publication / job exit / failure → discard owned pixel window
 ```
 
-분석의 전체 원본 비디오 검사와 클립의 별도 완전 디코딩은 유지합니다. 검토에서 재사용할 픽셀이 없으면 클립 검증 후 정확한 ordinal 구간을 디코딩하고 선택 프레임 수만 출력합니다. 앞부분의 디코딩·B-frame buffering까지 없애는 seek 최적화는 아닙니다. 작업 종료·오류·취소에는 임시 구간을 폐기하며, 원본/범위가 다르면 독립적으로 읽습니다. 최대 120프레임·축 1024의 기존 검토 한계를 유지합니다.
+분석의 전체 원본 비디오 검사와 클립의 별도 완전 디코딩은 유지합니다. 검토에서 재사용할 픽셀이 없으면 클립 검증 후 정확한 ordinal 구간을 디코딩하고 선택 프레임 수만 출력합니다. 앞부분의 디코딩·B-frame buffering까지 없애는 seek 최적화는 아닙니다. 소비한 픽셀 자원은 결과 확정 전에 정리하며, 정리 실패 때 완료 결과를 게시하지 않습니다. 작업 종료·오류·취소에도 임시 구간을 폐기하며 원본/범위가 다르면 독립적으로 읽습니다. 최대 120프레임·축 1024의 기존 검토 한계를 유지합니다.
 
 AAC는 **모든** 샘플 블록의 PTS·샘플 수·겹침을 끝까지 검사하되 선택 구간의 첫 시작·마지막 끝·블록 수만 보관합니다. 전체 interval 목록은 만들지 않으며 샘플 단위 경계·지연 음성·priming/padding 대조는 그대로입니다. 선택 구간 이후의 잘못된 샘플도 거부합니다. [오디오 요약 시험](tests/test_audio_windows.py), [실제 픽셀·음성 대조](tests/test_window_resources_native.py)
 
@@ -269,7 +269,7 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 290개 PASS | CLI·추적·검토·사건/입력 재생·원본/구간 자원·평가기·그림 출처 검사 |
+| 공개 테스트 | 291개 PASS | CLI·추적·검토·사건/입력 재생·원본/구간 자원·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |

@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from cheating_racer_detect.source import source_session
 
 from cheating_racer_detect.errors import AppError
 from cheating_racer_detect.review import export_review, render
@@ -163,6 +164,21 @@ class ActualMedia(unittest.TestCase):
             self.assertFalse(failed.exists())
             self.assertEqual(list(self.root.glob('.crd-review-*.partial')), [])
             export_review(source, 0, '.2', failed, ScriptedObserver(), TOOLS)
+
+    def test_pixel_cleanup_failure_prevents_publication_and_allows_new_job_retry(self):
+        from cheating_racer_detect import pixels
+        output = self.root/'cleanup-failure'
+        with source_session(pixel_parent=self.root), \
+                patch.object(pixels._Snapshot, 'close', side_effect=AppError('CLEANUP_FAILED', 'injected cleanup')):
+            with self.assertRaises(AppError) as caught:
+                export_review(self.paths['cfr'], 0, '.2', output, ScriptedObserver(), TOOLS)
+        self.assertEqual(caught.exception.code, 'CLEANUP_FAILED')
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob('.crd-review-*.partial')), [])
+        # Uncertain pixel resources are preserved; outer test fixture owns them.
+        self.assertTrue(list(self.root.glob('crd-pixels-*')))
+        result = export_review(self.paths['cfr'], 0, '.2', output, ScriptedObserver(), TOOLS)
+        self.assertEqual(result['review']['frame_count'], 2)
 
 
 if __name__ == '__main__':

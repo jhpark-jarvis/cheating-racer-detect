@@ -29,6 +29,9 @@ class _Job:
 
     def clear(self):
         self.snapshot = None
+        self.clear_pixels()
+
+    def clear_pixels(self):
         pixels, self.pixels = self.pixels, None
         if pixels is not None:
             pixels.close()
@@ -38,6 +41,13 @@ def active_job():
     """Internal synchronous owner only; expired/copied/threaded scopes are ignored."""
     job = _ACTIVE.get()
     return job if job is not None and job.active and job.thread == threading.get_ident() else None
+
+
+def release_pixels():
+    """Dispose pixel resources before a workflow publishes its final result."""
+    job = active_job()
+    if job is not None:
+        job.clear_pixels()
 
 
 @contextmanager

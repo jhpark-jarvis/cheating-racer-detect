@@ -12,7 +12,7 @@ from ..errors import AppError
 from ..paths import destination_path, local_path, source_path
 from ..pixels import pixel_window
 from ..service import _identity, _publish, _sha256, create_clip
-from ..source import inspect_source, source_job
+from ..source import inspect_source, release_pixels, source_job
 from ..tools import discover_tools, run_tool
 from ..tracking import Frame
 from .records import summarize
@@ -174,6 +174,9 @@ def export_review(input_path, start, end, output_path, observe, toolchain=None):
         local_path(stage)
         if _identity(output.parent)[:2] != parent or _identity(stage)[:2] != owner:
             raise AppError('OUTPUT_CONFLICT', '출력 또는 임시 작업 소유권이 변경되었습니다.')
+        # Cleanup can fail too: do not publish a complete bundle before all
+        # consumed pixel resources have been successfully disposed of.
+        release_pixels()
         # Delete intermediates only after checking the actual stage ownership.
         for name in ('source.bgr', 'review.bgr'):
             intermediate = local_path(stage/name)
