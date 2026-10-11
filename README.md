@@ -159,6 +159,10 @@ replay-001/
 
 파일 fingerprint는 내용 인증이 아닙니다. 같은 크기·수정 시각으로 내용을 바꾼 경우에도 결과 확정 전 SHA-256 검사에서 거부합니다. 영속 캐시나 장시간 streaming 구현은 아닙니다.
 
+### 3.8 Resource scaling diagnostic
+
+[자원 진단](scripts/benchmark_scaling.py)은 자체 영상을 3~600초로 확장하고 시작 또는 끝의 동일한 2.4초 사건을 처리합니다. 실제 원본 ordinal/PTS를 유지하며 분석 픽셀 24프레임만 저장하고 기존 후보·검토 클립 흐름을 사용합니다. 전체 시간축의 JSON 크기·초기 검사 Python allocation peak, 범주별 도구 시간·논리 hash 읽기량, 자체 프로세스 RAM과 표본 임시 용량을 구분해 출력합니다. 실제 영상이나 모델을 받는 성능 평가 도구는 아닙니다.
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -202,6 +206,9 @@ python -m scripts.demo_events --output "D:\candidate-demo-001"
 python -m scripts.demo_replay --output "D:\replay-demo-001"
 python -m scripts.benchmark_events --no-reuse
 python -m scripts.benchmark_events
+python -m scripts.benchmark_scaling --seconds 300 --window tail --no-reuse
+python -m scripts.benchmark_scaling --seconds 300 --window tail
+python -m scripts.benchmark_scaling --seconds 300 --window head
 python -m unittest discover -s tests -v
 ```
 
@@ -212,6 +219,8 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 ```
 
 `inputs.json`은 영상만으로 자동 생성되지 않습니다. 호출자가 검증된 `InputFrame` 관측과 명시 설정을 제공해야 하며 재생에 선택 의존성과 FFmpeg가 필요합니다.
+
+자원 진단은 소스 checkout에서 선택 의존성·FFmpeg가 있는 새 Python 프로세스로 매번 실행하세요. 결과는 경량 JSON stdout으로 나오며 생성 영상·클립은 종료 시 정리됩니다. `--seconds` 상한은 합성 생성량 제한이며 제품의 최대 영상 길이가 아닙니다.
 
 ### Input and resource limits
 
@@ -232,10 +241,11 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 234개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사 재사용·평가기·그림 출처 검사 |
+| 공개 테스트 | 245개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사·자원 진단·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
+| 자원 확장 | 10·60·300초 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |
@@ -245,6 +255,16 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어집니다. skip이 있는 실행을 전체 검증으로 볼 수 없습니다. 수동 플레이어·사용자 터미널·업무 수락은 아직 남아 있습니다. [그림 출처와 생성 프롬프트](assets/figures/provenance.json)는 유형·해시·원본 구현 revision을 구분합니다.
 
 `benchmark_events --no-reuse`와 기본 실행은 각기 새 Python 프로세스에서 비교하세요. 2.4초 자체 합성 영상의 원본 metadata/timeline 호출은 각각 4→1회, SHA-256은 7→7회, 완전 원본 디코딩은 1→1회였습니다. 전체 파일 시간축·원본 픽셀 디코딩은 여전히 필요하며 이 호출 감소를 실영상 속도 배율이나 장시간 처리 수락으로 해석하지 않습니다.
+
+확장 진단의 tail·재사용 on 대표 관측은 다음과 같습니다(각 조건 새 프로세스 1회, 96×64·10fps·무음 CFR).
+
+| 원본 길이 | 전체 프레임 | 시간축 JSON 문자 수 | 초기 검사 Python peak |
+| --- | --- | --- | --- |
+| 10초 | 100 | 16,281 | 0.25 MiB |
+| 60초 | 600 | 97,281 | 0.49 MiB |
+| 300초 | 3,000 | 488,104 | 1.66 MiB |
+
+분석 raw는 모두 432 KiB로 고정됐지만 전체 시간축 검사 메모리는 증가했습니다. 이 진단은 초기 검사 1회를 추가하므로 metadata/timeline 호출이 off/on 각각 5→1회이며 원본 hash7회·완전 decode1회·픽셀 decode2회는 유지됩니다. Python peak는 tracemalloc 관측으로 native RAM과 다르고 JSON 문자 수는 메모리 bytes가 아닙니다. 실행 시간에는 계측 overhead가 포함되며 생성 시간·자식 RAM/VRAM은 제외합니다. OS cache·백그라운드 부하가 통제되지 않아 속도 배율이나 HD/실영상 지원을 주장하지 않습니다.
 
 ## 6. Limitations and Planned Work
 
