@@ -55,7 +55,13 @@ class Native(unittest.TestCase):
                         '-show_frames', '-show_entries', 'frame=pts,nb_samples', '-of', 'json', source]))['frames']
                     base, sample_rate = F(audio['time_base']), int(audio['sample_rate'])
                     expected_audio = [(int(row['pts'])*base, int(row['pts'])*base+F(int(row['nb_samples']), sample_rate)) for row in records]
-                    self.assertEqual(media._audio_intervals(source, audio, TOOLS, 'INVALID_TIMELINE'), expected_audio)
+                    actual_audio = []
+                    media._frame_records(source, 'a:0', ('pts', 'nb_samples'), TOOLS, 'INVALID_TIMELINE',
+                        lambda row: actual_audio.append((F(int(row['pts']))*F(audio['time_base']),
+                            F(int(row['pts']))*F(audio['time_base'])+F(int(row['nb_samples']), int(audio['sample_rate'])))))
+                    self.assertEqual(actual_audio, expected_audio)
+                    self.assertEqual(media._audio_window(source, audio, TOOLS, 'INVALID_TIMELINE'),
+                        media.AudioWindow(expected_audio[0][0], expected_audio[-1][1], len(expected_audio)))
                 self.assertEqual(sha256(source), before)
 
     def test_cancel_actual_probe_reaps_child_clears_job_and_retries_clip(self):

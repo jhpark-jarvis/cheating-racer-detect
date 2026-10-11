@@ -384,23 +384,42 @@ def select_frames(timeline: Timeline, start: Fraction, end: Fraction) -> tuple[F
     return frames
 
 
-def _audio_intervals(source: Path, audio: dict, toolchain: Toolchain, code: str) -> list[tuple[Fraction, Fraction]]:
-    """Decoded samples, excluding skip-sample priming reported by the decoder."""
+@dataclass(frozen=True)
+class AudioWindow:
+    first: Fraction | None
+    end: Fraction | None
+    count: int
+
+
+def _audio_window(source: Path, audio: dict, toolchain: Toolchain, code: str,
+                  window: tuple[Fraction, Fraction] | None = None) -> AudioWindow:
+    """Validate EVERY decoded sample block, retain only selected endpoints/count."""
     base = _fraction(audio.get("time_base"), code)
     sample_rate = _integer(audio.get("sample_rate"), code)
     if base <= 0 or sample_rate <= 0:
         raise AppError(code, "오디오 시간 기준을 확인할 수 없습니다.")
-    intervals = []
+    previous_end = first = last = None
+    count = 0
 
     def accept(frame):
+        nonlocal previous_end, first, last, count
         begin = _integer(frame.get("pts"), code) * base
         sample_count = _integer(frame.get("nb_samples"), code)
-        if sample_count <= 0 or (intervals and begin < intervals[-1][1] - Fraction(1, sample_rate)):
+        if sample_count <= 0 or (previous_end is not None and begin < previous_end - Fraction(1, sample_rate)):
             raise AppError(code, "오디오 표시 시각이 겹치거나 샘플 수가 잘못되었습니다.")
-        intervals.append((begin, begin + Fraction(sample_count, sample_rate)))
+        finish = begin + Fraction(sample_count, sample_rate)
+        previous_end = finish
+        if window is not None:
+            if begin >= window[1] or finish <= window[0]:
+                return
+            begin, finish = max(begin, window[0]), min(finish, window[1])
+        if first is None:
+            first = begin
+        last = finish
+        count += 1
 
     _frame_records(source, 'a:0', ('pts', 'nb_samples'), toolchain, code, accept)
-    return intervals
+    return AudioWindow(first, last, count)
 
 
 def _check_codecs(toolchain: Toolchain, audio: bool) -> None:
@@ -427,13 +446,13 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
     _check_codecs(toolchain, audio is not None)
     absolute_start = timeline.origin + begin
     absolute_end = timeline.origin + finish
-    source_audio = _audio_intervals(source, audio, toolchain, "INVALID_TIMELINE") if audio else []
     # AAC frames can straddle the request boundaries; atrim selects individual
     # samples. Samples before a delayed track begins are not synthesized.
     audio_sample_rate = _integer(audio["sample_rate"]) if audio else 1
     audio_trim_start = Fraction(math.ceil(absolute_start * audio_sample_rate), audio_sample_rate)
     audio_trim_end = Fraction(math.ceil(absolute_end * audio_sample_rate), audio_sample_rate)
-    selected_audio = [(max(a, audio_trim_start), min(b, audio_trim_end)) for a, b in source_audio if a < audio_trim_end and b > audio_trim_start]
+    selected_audio = (_audio_window(source, audio, toolchain, "INVALID_TIMELINE", (audio_trim_start, audio_trim_end))
+                      if audio else AudioWindow(None, None, 0))
     start_tick = math.ceil(absolute_start / timeline.time_base)
     end_tick = math.ceil(absolute_end / timeline.time_base)
     # Retain the requested origin, not STARTPTS, so a late audio start and the
@@ -493,18 +512,18 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
     expected_dimensions = (video["height"], video["width"]) if rotation in {90, 270} else (video["width"], video["height"])
     if (out_video["width"], out_video["height"]) != expected_dimensions or _rotation(out_video, "OUTPUT_INVALID") != 0:
         raise AppError("OUTPUT_INVALID", "출력의 크기 또는 회전 정보가 예상과 다릅니다.")
-    audio_expected = bool(selected_audio)
+    audio_expected = selected_audio.count > 0
     if bool(out_audio) != audio_expected:
         raise AppError("OUTPUT_INVALID", "요청 구간의 오디오 유무와 출력이 다릅니다.")
     audio_timing: dict = {"status": "not_applicable", "reason": "no_audio_samples_in_interval"}
     if out_audio:
-        output_audio = _audio_intervals(destination, out_audio, toolchain, "OUTPUT_INVALID")
-        if not output_audio:
+        output_audio = _audio_window(destination, out_audio, toolchain, "OUTPUT_INVALID")
+        if not output_audio.count:
             raise AppError("OUTPUT_INVALID", "출력 오디오를 샘플로 디코딩할 수 없습니다.")
-        expected_audio_start = selected_audio[0][0] - absolute_start
-        expected_audio_end = selected_audio[-1][1] - absolute_start
-        audio_start_error = abs(output_audio[0][0] - expected_audio_start)
-        audio_end_error = abs(output_audio[-1][1] - expected_audio_end)
+        expected_audio_start = selected_audio.first - absolute_start
+        expected_audio_end = selected_audio.end - absolute_start
+        audio_start_error = abs(output_audio.first - expected_audio_start)
+        audio_end_error = abs(output_audio.end - expected_audio_end)
         # AAC LC encodes 1024 samples per block. End padding / edit lists are
         # measured separately from video and never inferred from MP4 duration.
         audio_tolerance = Fraction(1024, audio_sample_rate) + Fraction(1, movie_timescale)
@@ -512,8 +531,8 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
             raise AppError("OUTPUT_INVALID", "출력 오디오의 시작·끝이 원본 공통 시간 기준과 다릅니다.")
         audio_timing = {
             "status": "verified", "expected_first_sample_seconds": _seconds(expected_audio_start),
-            "actual_first_sample_seconds": _seconds(output_audio[0][0]),
-            "expected_sample_end_seconds": _seconds(expected_audio_end), "actual_sample_end_seconds": _seconds(output_audio[-1][1]),
+            "actual_first_sample_seconds": _seconds(output_audio.first),
+            "expected_sample_end_seconds": _seconds(expected_audio_end), "actual_sample_end_seconds": _seconds(output_audio.end),
             "start_error_seconds": _seconds(audio_start_error), "end_error_seconds": _seconds(audio_end_error),
             "tolerance_seconds": _seconds(audio_tolerance),
         }

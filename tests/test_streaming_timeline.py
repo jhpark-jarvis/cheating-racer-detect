@@ -117,9 +117,9 @@ class FrameProtocolTests(unittest.TestCase):
                 for line in text.splitlines(keepends=True):
                     consume(line)
             with patch.object(media, 'run_tool_lines', side_effect=run):
-                return media._audio_intervals(Path('input.mp4'), {'time_base': '1/48000', 'sample_rate': 48000}, TOOLS, 'OUTPUT_INVALID')
+                return media._audio_window(Path('input.mp4'), {'time_base': '1/48000', 'sample_rate': 48000}, TOOLS, 'OUTPUT_INVALID')
         self.assertEqual(audio(wire([{'pts': 24000, 'nb_samples': 1024}, {'pts': 25024, 'nb_samples': 1024}])),
-                         [(F(1, 2), F(391, 750)), (F(391, 750), F(407, 750))])
+                         media.AudioWindow(F(1, 2), F(407, 750), 2))
         for rows in ([{'pts': 0, 'nb_samples': 0}], [{'pts': 0, 'nb_samples': -1}],
                      [{'pts': 'N/A', 'nb_samples': 1024}],
                      [{'pts': 0, 'nb_samples': 1024}, {'pts': 100, 'nb_samples': 1024}]):
