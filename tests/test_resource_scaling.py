@@ -14,6 +14,27 @@ from scripts import benchmark_scaling as scaling
 
 
 class Diagnostic(unittest.TestCase):
+    def test_streaming_measurement_counts_lines_without_retaining_them(self):
+        tools = Toolchain(Path('ffmpeg'), Path('ffprobe'))
+        source = Path('source.mp4')
+        metrics = scaling.Measurements(source, tools)
+        def stream(args, consume, **kwargs):
+            consume('[FRAME]\n')
+            consume('pts=0\n')
+            consume('[/FRAME]\n')
+        metrics.actual_lines = stream
+        lines = []
+        metrics.run_lines([tools.ffprobe, '-show_frames', source], lines.append)
+        self.assertEqual(metrics.timeline_stdout_characters, sum(map(len, lines)))
+        self.assertEqual(metrics.tool_calls['source_timeline_probe'], 1)
+        def cancel(line):
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            metrics.run_lines([tools.ffprobe, '-show_frames', source], cancel)
+        self.assertEqual(metrics.tool_calls['source_timeline_probe'], 2)
+        self.assertEqual(metrics.timeline_stdout_characters, sum(map(len, lines)) + len('[FRAME]\n'))
+        self.assertGreaterEqual(metrics.tool_seconds['source_timeline_probe'], 0)
+
     def test_bad_input_rejected_before_discovery_or_generation(self):
         cases = [(n, 'tail') for n in (True, 2, 601, 3., '3', None)]+[(3, w) for w in ('', None, 'middle')]
         for seconds, window in cases:

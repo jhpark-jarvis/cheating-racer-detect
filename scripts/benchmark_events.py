@@ -114,10 +114,14 @@ def benchmark(*, reuse=True):
         source = demo_events.generate(toolchain, root)
         output = root/'result'
         calls, hash_reads = Counter(), 0
-        actual_tool, actual_hash, actual_publish = tools.run_tool, service._sha256, service._publish
+        actual_tool, actual_lines = tools.run_tool, tools.run_tool_lines
+        actual_hash, actual_publish = service._sha256, service._publish
         def run(args, **kwargs):
             calls[classify(args, source, toolchain)] += 1
             return actual_tool(args, **kwargs)
+        def run_lines(args, consume, **kwargs):
+            calls[classify(args, source, toolchain)] += 1
+            return actual_lines(args, consume, **kwargs)
         def hash_file(path):
             nonlocal hash_reads
             hash_reads += path == source
@@ -125,6 +129,8 @@ def benchmark(*, reuse=True):
         with DiskSampler(root) as disk, ExitStack() as stack, source_session(reuse=reuse):
             for module in (tools, media, video, demo_events):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=run))
+            for module in (tools, media):
+                stack.enter_context(patch.object(module, 'run_tool_lines', side_effect=run_lines))
             for module in (service, video, export, demo_events):
                 stack.enter_context(patch.object(module, '_sha256', side_effect=hash_file))
             for module in (service, video, export):

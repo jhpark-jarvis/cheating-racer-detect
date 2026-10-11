@@ -63,6 +63,7 @@ class Measurements:
         self.hash_reads = self.hash_bytes = 0
         self.hash_seconds = 0.
         self.actual_tool, self.actual_hash = tools.run_tool, service._sha256
+        self.actual_lines = tools.run_tool_lines
 
     def run(self, args, **kwargs):
         kind = classify(args, self.source, self.toolchain)
@@ -87,6 +88,19 @@ class Measurements:
         finally:
             self.hash_seconds += time.perf_counter()-start
 
+    def run_lines(self, args, consume, **kwargs):
+        kind = classify(args, self.source, self.toolchain)
+        self.tool_calls[kind] += 1
+        def measured(line):
+            if kind == 'source_timeline_probe':
+                self.timeline_stdout_characters += len(line)
+            consume(line)
+        start = time.perf_counter()
+        try:
+            return self.actual_lines(args, measured, **kwargs)
+        finally:
+            self.tool_seconds[kind] += time.perf_counter()-start
+
 
 def benchmark(*, seconds=60, window='tail', reuse=True):
     validate(seconds, window)
@@ -104,6 +118,8 @@ def benchmark(*, seconds=60, window='tail', reuse=True):
         with DiskSampler(root) as disk, ExitStack() as stack, allocation_trace(), source_session(reuse=reuse):
             for module in (tools, media, video, demo_events):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=metrics.run))
+            for module in (tools, media):
+                stack.enter_context(patch.object(module, 'run_tool_lines', side_effect=metrics.run_lines))
             for module in (service, video, export, demo_events):
                 stack.enter_context(patch.object(module, '_sha256', side_effect=metrics.hash_file))
             for module in (service, video, export):
@@ -114,6 +130,7 @@ def benchmark(*, seconds=60, window='tail', reuse=True):
             inspection_current, inspection_peak = tracemalloc.get_traced_memory()
             inspection_memory = own_memory()
             source_frames = len(timeline.frames)
+            timeline_storage_bytes = timeline.storage_bytes
             if source_frames != seconds*10 or timeline.end != seconds:
                 raise ValueError('Padded fixture duration/frame count mismatch')
             del timeline  # Off mode must not retain an extra diagnostic copy during the workflow.
@@ -149,6 +166,8 @@ def benchmark(*, seconds=60, window='tail', reuse=True):
                 'source_sha256_reads': metrics.hash_reads, 'source_sha256_logical_bytes': metrics.hash_bytes,
                 'source_sha256_seconds': metrics.hash_seconds,
                 'source_timeline_stdout_characters': metrics.timeline_stdout_characters,
+                'source_timeline_protocol': 'default-frame-sections-v1',
+                'source_timeline_packed_payload_bytes': timeline_storage_bytes,
                 'tool_calls': dict(sorted(metrics.tool_calls.items())),
                 'tool_seconds': dict(sorted(metrics.tool_seconds.items())),
                 'owned_tree_sampled_peak_bytes': disk.peak, 'partial_tree_sampled_peak_bytes': disk.partial_peak,

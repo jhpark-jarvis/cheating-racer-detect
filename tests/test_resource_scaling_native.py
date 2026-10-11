@@ -44,6 +44,8 @@ class Native(unittest.TestCase):
                             ('derived_metadata_probe', 2), ('derived_timeline_probe', 2), ('derived_full_decode', 2)):
                         self.assertEqual(calls[key], count)
                     self.assertGreater(result['source_timeline_stdout_characters'], 0)
+                    self.assertEqual(result['source_timeline_protocol'], 'default-frame-sections-v1')
+                    self.assertEqual(result['source_timeline_packed_payload_bytes'], 16*result['source_frames'])
                     self.assertGreaterEqual(result['python_traced_peak_bytes'], result['inspection_python_traced_peak_bytes'])
                     self.assertFalse(tracemalloc.is_tracing())
                     self.assertTrue(result['disk_sampling_serialized_with_publication'])
