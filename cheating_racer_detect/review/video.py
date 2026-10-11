@@ -47,7 +47,7 @@ def prepare(source, start, end, tools):
     if (len(selected) > MAX_FRAMES or timeline.time_base.denominator > 1_000_000
             or timeline.time_base.numerator > 1_000_000):
         raise AppError('REVIEW_LIMIT', '검토 구간은 최대 120프레임과 제한된 time base를 지원합니다.')
-    first = next(i for i, f in enumerate(timeline.frames) if f.pts == selected[0].pts)
+    first = timeline.lower_bound(selected[0].pts)
     return video, timeline, selected, first, _rotation(video, 'UNSUPPORTED_MEDIA')
 
 

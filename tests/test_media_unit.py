@@ -125,7 +125,10 @@ class DecodedTimelineTests(unittest.TestCase):
         return [{"pts": p, "duration": 100, "width": 320, "height": 180, "pix_fmt": "yuv420p"} for p in pts]
 
     def decode(self, frames):
-        with patch("cheating_racer_detect.media._json_tool", return_value={"frames": frames}):
+        def records(_source, _stream, _fields, _tools, _code, accept):
+            for frame in frames:
+                accept(frame)
+        with patch("cheating_racer_detect.media._frame_records", side_effect=records):
             return _timeline(Path("input.mp4"), self.video, self.tools, "INVALID_TIMELINE")
 
     def test_missing_actual_pts_is_not_replaced_with_fps(self):

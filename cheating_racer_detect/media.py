@@ -7,16 +7,18 @@ network client, image reconstruction, or stream-copy path is used here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Sequence
 from decimal import Decimal, localcontext
 from fractions import Fraction
 import json
 import math
+import operator
 from pathlib import Path
 import struct
 from typing import BinaryIO
 
 from .errors import AppError
-from .tools import Toolchain, run_tool
+from .tools import Toolchain, run_tool, run_tool_lines
 
 
 @dataclass(frozen=True)
@@ -25,10 +27,90 @@ class Frame:
     duration: int
 
 
+_FRAME_RECORD = struct.Struct('<qQ')
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _PackedFrames(Sequence[Frame]):
+    """Immutable 16-byte records; materialize Frame values only when accessed."""
+    data: bytes
+
+    def __len__(self):
+        return len(self.data) // _FRAME_RECORD.size
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return tuple(self[i] for i in range(*index.indices(len(self))))
+        index = operator.index(index)
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError('frame index out of range')
+        return Frame(*_FRAME_RECORD.unpack_from(self.data, index * _FRAME_RECORD.size))
+
+    def __iter__(self):
+        return (Frame(*record) for record in _FRAME_RECORD.iter_unpack(self.data))
+
+    def __eq__(self, other):
+        if isinstance(other, _PackedFrames):
+            return self.data == other.data
+        if isinstance(other, tuple):
+            return len(self) == len(other) and all(a == b for a, b in zip(self, other))
+        return NotImplemented
+
+    def __hash__(self):
+        return hash(tuple(self))
+
+
+class _FrameBuilder:
+    """Mutable only during inspection; wide durations retain prior int semantics."""
+    def __init__(self):
+        self.data = bytearray()
+        self.wide = None
+        self.last = None
+
+    def append(self, pts, duration):
+        if self.wide is None and duration > 2**64 - 1:
+            self.wide = list(_PackedFrames(bytes(self.data)))
+            self.data.clear()
+        if self.wide is None:
+            self.data.extend(_FRAME_RECORD.pack(pts, duration))
+        else:
+            self.wide.append(Frame(pts, duration))
+        self.last = Frame(pts, duration)
+
+    def last_duration(self, duration):
+        pts = self.last.pts
+        if self.wide is None:
+            del self.data[-_FRAME_RECORD.size:]
+        else:
+            self.wide.pop()
+        self.append(pts, duration)
+
+    def freeze(self):
+        return _PackedFrames(bytes(self.data)) if self.wide is None else tuple(self.wide)
+
+
 @dataclass(frozen=True)
 class Timeline:
     time_base: Fraction
-    frames: tuple[Frame, ...]
+    frames: Sequence[Frame]
+
+    @property
+    def storage_bytes(self) -> int | None:
+        """Packed payload only, not process RAM; tuple fallback has no fixed size."""
+        return len(self.frames.data) if isinstance(self.frames, _PackedFrames) else None
+
+    def lower_bound(self, pts: Fraction) -> int:
+        """First source ordinal with PTS >= the exact (possibly fractional) tick."""
+        low, high = 0, len(self.frames)
+        while low < high:
+            middle = (low + high) // 2
+            if self.frames[middle].pts < pts:
+                low = middle + 1
+            else:
+                high = middle
+        return low
 
     @property
     def origin(self) -> Fraction:
@@ -216,46 +298,87 @@ def _profile(info: dict, code: str = "UNSUPPORTED_MEDIA") -> tuple[dict, dict | 
     return video, audio
 
 
+def _frame_records(source, stream, fields, toolchain, code, accept):
+    """Strict default-writer sections, one owned frame dictionary at a time.
+
+    Side-data fields are explicitly disabled: their variable payloads were not
+    used by the old JSON validation. Empty wrappers are still emitted by ffprobe.
+    """
+    current = None
+    side_data = False
+
+    def consume(line):
+        nonlocal current, side_data
+        line = line.rstrip('\r\n')
+        if line == '[FRAME]' and current is None:
+            current = {}
+        elif line == '[SIDE_DATA]' and current is not None and not side_data:
+            side_data = True
+        elif line == '[/SIDE_DATA]' and side_data:
+            side_data = False
+        elif line == '[/FRAME]' and current is not None and not side_data:
+            # Default writer spells absent optional fields N/A; JSON omits them.
+            accept({key: value for key, value in current.items() if value != 'N/A'})
+            current = None
+        elif current is not None and not side_data and '=' in line:
+            key, value = line.split('=', 1)
+            if key not in fields or key in current or not value or '\\' in value:
+                raise AppError(code, '미디어 프레임 필드가 올바르지 않습니다.')
+            current[key] = value
+        else:
+            raise AppError(code, '미디어 프레임 구획이 올바르지 않습니다.')
+
+    run_tool_lines([
+        toolchain.ffprobe, '-v', 'error', '-err_detect', 'explode', *_input_options(),
+        '-select_streams', stream, '-show_frames', '-show_entries',
+        'frame=' + ','.join(fields) + ':frame_side_data=',
+        '-of', 'default', source,
+    ], consume, error_code=code)
+    if current is not None or side_data:
+        raise AppError(code, '미디어 프레임 구획이 끝나지 않았습니다.')
+
+
 def _timeline(source: Path, video: dict, toolchain: Toolchain, code: str) -> Timeline:
     base = _fraction(video.get("time_base"), code)
     if base <= 0 or base.denominator > 2_147_483_647:
         raise AppError(code, "비디오 time base를 지원할 수 없습니다.")
-    data = _json_tool([
-        toolchain.ffprobe, "-v", "error", "-err_detect", "explode", *_input_options(),
-        "-select_streams", "v:0", "-show_frames", "-show_entries",
-        "frame=pts,duration,pkt_duration,width,height,pix_fmt,color_transfer,color_primaries", "-of", "json", source,
-    ], code)
-    frames: list[Frame] = []
-    for value in data.get("frames", []):
+    frames = _FrameBuilder()
+
+    def accept(value):
         pts = _integer(value.get("pts"), code)
-        if abs(pts) >= 2**52 or (frames and pts <= frames[-1].pts):
+        if abs(pts) >= 2**52 or (frames.last is not None and pts <= frames.last.pts):
             raise AppError(code, "비디오 표시 시각은 유효한 범위에서 순서대로 증가해야 합니다.")
-        if value.get("width") != video["width"] or value.get("height") != video["height"] or value.get("pix_fmt") != video["pix_fmt"]:
+        if (_integer(value.get("width"), code) != video["width"]
+                or _integer(value.get("height"), code) != video["height"] or value.get("pix_fmt") != video["pix_fmt"]):
             raise AppError("UNSUPPORTED_MEDIA" if code != "OUTPUT_INVALID" else code, "파일 중간의 해상도·픽셀 형식 변경은 지원하지 않습니다.")
         if value.get("color_transfer") in {"smpte2084", "arib-std-b67"} or value.get("color_primaries") == "bt2020":
             raise AppError("UNSUPPORTED_MEDIA" if code != "OUTPUT_INVALID" else code, "HDR 프레임은 현재 지원하지 않습니다.")
         duration = _integer(value.get("duration", value.get("pkt_duration", 0)), code)
         if duration < 0:
             raise AppError(code, "음수 프레임 길이를 처리할 수 없습니다.")
-        frames.append(Frame(pts, duration))
-    if not frames:
+        if frames.last is not None and frames.last.duration == 0:
+            frames.last_duration(pts - frames.last.pts)
+        frames.append(pts, duration)
+
+    _frame_records(source, 'v:0', ('pts', 'duration', 'pkt_duration', 'width', 'height',
+                                'pix_fmt', 'color_transfer', 'color_primaries'), toolchain, code, accept)
+    if frames.last is None:
         raise AppError(code, "표시 시각이 있는 비디오 프레임이 없습니다.")
-    for index in range(len(frames) - 1):
-        if frames[index].duration == 0:
-            frames[index] = Frame(frames[index].pts, frames[index + 1].pts - frames[index].pts)
-    if frames[-1].duration <= 0:
+    if frames.last.duration <= 0:
         stream_end = _integer(video.get("start_pts"), code) + _integer(video.get("duration_ts"), code)
-        duration = stream_end - frames[-1].pts
+        duration = stream_end - frames.last.pts
         if duration <= 0:
             raise AppError(code, "마지막 프레임의 표시 끝을 확인할 수 없습니다.")
-        frames[-1] = Frame(frames[-1].pts, duration)
-    return Timeline(base, tuple(frames))
+        frames.last_duration(duration)
+    return Timeline(base, frames.freeze())
 
 
 def select_frames(timeline: Timeline, start: Fraction, end: Fraction) -> tuple[Frame, ...]:
     if start < 0 or end <= start or end > timeline.end:
         raise AppError("INVALID_RANGE", "0 ≤ 시작 < 끝 ≤ 비디오 관측 끝인 구간을 지정하세요.")
-    frames = tuple(f for f in timeline.frames if start <= f.pts * timeline.time_base - timeline.origin < end)
+    first = timeline.lower_bound((timeline.origin + start) / timeline.time_base)
+    last = timeline.lower_bound((timeline.origin + end) / timeline.time_base)
+    frames = tuple(timeline.frames[i] for i in range(first, last))
     if not frames:
         raise AppError("EMPTY_INTERVAL", "요청한 구간에 표시를 시작하는 비디오 프레임이 없습니다.")
     return frames
@@ -267,17 +390,16 @@ def _audio_intervals(source: Path, audio: dict, toolchain: Toolchain, code: str)
     sample_rate = _integer(audio.get("sample_rate"), code)
     if base <= 0 or sample_rate <= 0:
         raise AppError(code, "오디오 시간 기준을 확인할 수 없습니다.")
-    data = _json_tool([
-        toolchain.ffprobe, "-v", "error", "-err_detect", "explode", *_input_options(),
-        "-select_streams", "a:0", "-show_frames", "-show_entries", "frame=pts,nb_samples", "-of", "json", source,
-    ], code)
     intervals = []
-    for frame in data.get("frames", []):
+
+    def accept(frame):
         begin = _integer(frame.get("pts"), code) * base
         sample_count = _integer(frame.get("nb_samples"), code)
         if sample_count <= 0 or (intervals and begin < intervals[-1][1] - Fraction(1, sample_rate)):
             raise AppError(code, "오디오 표시 시각이 겹치거나 샘플 수가 잘못되었습니다.")
         intervals.append((begin, begin + Fraction(sample_count, sample_rate)))
+
+    _frame_records(source, 'a:0', ('pts', 'nb_samples'), toolchain, code, accept)
     return intervals
 
 
