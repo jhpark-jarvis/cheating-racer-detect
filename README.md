@@ -173,6 +173,21 @@ PTS/duration은 일반 경로에서 프레임당 16바이트의 immutable 데이
 
 [자원 진단](scripts/benchmark_scaling.py)은 자체 영상을 3~600초로 확장하고 시작/끝의 동일한 2.4초 사건을 처리합니다. 실제 ordinal/PTS·24프레임 분석·기존 후보/검토 흐름을 유지하며 초기 Python peak·packed payload·프로토콜 문자 수·도구 시간·논리 hash 읽기량·자체 RAM·표본 임시 용량을 구분합니다. 실제 영상이나 모델을 받는 성능 평가 도구는 아닙니다.
 
+### 3.9 Shared pixel windows and audio summaries
+
+[구간 디코더](cheating_racer_detect/pixels.py)는 한 동기 작업에서 직접 생성한 픽셀 구간 하나를 디스크에 보관합니다. 같은 원본·도구·파일 식별자·시간축·크기이며 기존 구간 안에 포함될 때만 읽기 전용으로 재사용합니다. 분석 24프레임 안의 검토 14프레임을 다시 디코딩하지 않고 byte offset으로 읽으며, 모델·callback·추적 상태는 재사용하지 않습니다.
+
+```text
+source validation → selected coded pixels on disk → event analysis
+                              └─ contained range → review rendering
+source hash + complete clip decode + independent output checks → publish
+job exit / failure / cancellation → discard owned pixel window
+```
+
+분석의 전체 원본 비디오 검사와 클립의 별도 완전 디코딩은 유지합니다. 검토에서 재사용할 픽셀이 없으면 클립 검증 후 정확한 ordinal 구간을 디코딩하고 선택 프레임 수만 출력합니다. 앞부분의 디코딩·B-frame buffering까지 없애는 seek 최적화는 아닙니다. 작업 종료·오류·취소에는 임시 구간을 폐기하며, 원본/범위가 다르면 독립적으로 읽습니다. 최대 120프레임·축 1024의 기존 검토 한계를 유지합니다.
+
+AAC는 **모든** 샘플 블록의 PTS·샘플 수·겹침을 끝까지 검사하되 선택 구간의 첫 시작·마지막 끝·블록 수만 보관합니다. 전체 interval 목록은 만들지 않으며 샘플 단위 경계·지연 음성·priming/padding 대조는 그대로입니다. 선택 구간 이후의 잘못된 샘플도 거부합니다. [오디오 요약 시험](tests/test_audio_windows.py), [실제 픽셀·음성 대조](tests/test_window_resources_native.py)
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -232,6 +247,8 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 
 자원 진단은 소스 checkout에서 선택 의존성·FFmpeg가 있는 새 Python 프로세스로 매번 실행하세요. 결과는 경량 JSON stdout으로 나오며 생성 영상·클립은 종료 시 정리됩니다. `--seconds` 상한은 합성 생성량 제한이며 제품의 최대 영상 길이가 아닙니다.
 
+`--no-reuse`는 작업 내 메타데이터/시간축과 픽셀 재사용을 함께 끕니다. 진단의 픽셀 임시 자료는 용량 관측 대상 폴더 안에 두며, `analysis_raw_bytes`는 검증한 선택 픽셀 크기입니다. 작업 종료 후 남는 파일 크기가 아닙니다.
+
 ### Input and resource limits
 
 | 항목 | 지원 범위 |
@@ -252,12 +269,13 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 267개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사·자원 진단·평가기·그림 출처 검사 |
+| 공개 테스트 | 290개 PASS | CLI·추적·검토·사건/입력 재생·원본/구간 자원·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
+| 구간 픽셀·음성 요약 | 8종 coded BGR·6종 AAC의 독립 full decode/JSON 대조 | bounded/complete·포함 구간 픽셀 exact 일치, 오디오 구간 요약·빈/지연 음성·actual raw child 취소/회수/재시도 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |
@@ -279,7 +297,18 @@ FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어�
 
 비교 기준은 [기존 시간축 구현](https://github.com/jhpark-jarvis/cheating-racer-detect/blob/bf6eea3ac59f4c685d04fd56766eb4fd49276f76/cheating_racer_detect/media.py)이며 모든 원본 프레임을 검사했습니다. 300초 조건의 추가 역순 반복에서도 peak는 각각 1.500/0.104 MiB였습니다. 약 93% 감소는 이 검사 단계의 Python allocation에 한정합니다. [자동 비교 시험](tests/test_streaming_timeline.py), [실제 미디어 동등성 시험](tests/test_streaming_timeline_native.py)
 
-전체 사건 진단에서도 300/600초의 head/tail에서 분석 raw 432 KiB·검토14프레임·원본 hash7회·완전 decode1회·픽셀 decode2회를 유지했습니다. 진단용 초기 검사 1회가 추가돼 metadata/timeline 호출은 off/on 각각 5→1회입니다. 프로토콜 문자 수·packed payload·tracemalloc peak는 서로 다른 측정이며 자식 RAM/VRAM은 제외합니다. OS cache·백그라운드 부하와 계측 overhead가 통제되지 않아 속도 배율이나 HD/실영상 지원을 주장하지 않습니다.
+현재 전체 사건 진단의 300/600초 head/tail 비교에서 분석 픽셀 432 KiB·검토14프레임·원본 hash7회·별도 완전 decode1회를 유지하며, 포함 구간의 픽셀 decode는 재사용 off/on **2→1회**였습니다. 진단용 초기 검사 1회가 추가돼 metadata/timeline 호출은 각각 5→1회입니다. 재사용 구간을 작업 끝까지 보관하므로 임시 디스크 최고치가 반드시 줄지는 않습니다.
+
+다음은 48 kHz mono AAC 합성 원본의 마지막 2.4초를 선택했을 때, **오디오 검사/보관 단계만** 측정한 Python allocation peak입니다. [이전 interval-list 구현](https://github.com/jhpark-jarvis/cheating-racer-detect/blob/5b7f43a739fe74d3d5e14150e660c0daa220b7c5/cheating_racer_detect/media.py)과 현재 요약 경로를 조건마다 새 프로세스로 실행했고 생성·import는 제외했습니다. 모든 샘플 블록을 검사했으며 선택된 113개 블록의 첫 시작·끝·수가 동일했습니다.
+
+| 원본 길이 | 전체 AAC 블록 | interval-list peak | endpoint-summary peak |
+| --- | --- | --- | --- |
+| 10초 | 469 | 0.098 MiB | 0.015 MiB |
+| 60초 | 2,813 | 0.673 MiB | 0.015 MiB |
+| 300초 | 14,063 | 3.448 MiB | 0.015 MiB |
+| 600초 | 28,125 | 6.922 MiB | 0.015 MiB |
+
+600초 조건의 약 99.8% 감소는 오디오 검사 단계의 Python allocation에 한정합니다. 전체 비디오 시간축은 여전히 O(N)이고 해시·완전 디코딩·인코딩의 원본 읽기는 남습니다. 프로토콜 문자 수·payload·tracemalloc·자체 RAM은 서로 다른 측정이며 자식 RAM/VRAM은 제외합니다. OS cache·백그라운드 부하와 계측 overhead가 통제되지 않아 속도 배율·일정 RAM·HD/실영상 지원을 주장하지 않습니다.
 
 ## 6. Limitations and Planned Work
 
