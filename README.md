@@ -157,11 +157,21 @@ replay-001/
 
 [원본 검사](cheating_racer_detect/source.py)는 한 동기 작업의 중첩 호출에서만 메타데이터와 immutable PTS 시간축을 재사용합니다. 경로·파일 식별자·크기·수정 시각을 매번 확인하고, 다른 원본/도구에는 재사용하지 않습니다. 작업 종료·오류·취소 때 기록을 폐기하며 다음 작업은 다시 검사합니다. 컨테이너의 외부 참조 거부, 원본 SHA-256 대조, 완전 디코딩과 파생 영상의 독립 PTS 검증은 생략하지 않습니다.
 
-파일 fingerprint는 내용 인증이 아닙니다. 같은 크기·수정 시각으로 내용을 바꾼 경우에도 결과 확정 전 SHA-256 검사에서 거부합니다. 영속 캐시나 장시간 streaming 구현은 아닙니다.
+파일 fingerprint는 내용 인증이 아닙니다. 같은 크기·수정 시각으로 내용을 바꾼 경우에도 결과 확정 전 SHA-256 검사에서 거부합니다. 영속 캐시가 아니며 원본 전체 검사는 아래 순차 읽기를 사용합니다.
 
-### 3.8 Resource scaling diagnostic
+### 3.8 Incremental timeline and resource scaling
 
-[자원 진단](scripts/benchmark_scaling.py)은 자체 영상을 3~600초로 확장하고 시작 또는 끝의 동일한 2.4초 사건을 처리합니다. 실제 원본 ordinal/PTS를 유지하며 분석 픽셀 24프레임만 저장하고 기존 후보·검토 클립 흐름을 사용합니다. 전체 시간축의 JSON 크기·초기 검사 Python allocation peak, 범주별 도구 시간·논리 hash 읽기량, 자체 프로세스 RAM과 표본 임시 용량을 구분해 출력합니다. 실제 영상이나 모델을 받는 성능 평가 도구는 아닙니다.
+[시간축 검사](cheating_racer_detect/media.py)는 전체 프레임 JSON 대신 ffprobe의 명시적 프레임 구획을 한 줄씩 읽습니다. 모든 프레임의 PTS·크기·픽셀 형식·HDR·duration을 검사하고 도구의 정상 종료까지 확인한 뒤 시간축을 반환합니다. 중복 필드·불완전 구획·늦은 형식 변경은 거부합니다. AAC 샘플 기록도 순차 검사합니다. [ffprobe 공식 문서](https://ffmpeg.org/ffprobe.html#default)
+
+```text
+full-source frame records → validate each record → immutable PTS/duration
+                                                   ↓ exact binary lookup
+                                            selected frames + source ordinals
+```
+
+PTS/duration은 일반 경로에서 프레임당 16바이트의 immutable 데이터로 보관하고, 접근할 때만 `Frame`을 만듭니다. 기존 정수 범위를 줄이지 않도록 매우 큰 duration은 객체 tuple로 보관합니다. `[start,end)` 선택은 exact Fraction 경계를 이진 탐색하며 평균 FPS나 부정확한 seek로 원본 시각을 대체하지 않습니다. 전체 시간축 보관은 여전히 O(N)이고 원본 해시·완전 디코딩·출력 검증은 유지합니다.
+
+[자원 진단](scripts/benchmark_scaling.py)은 자체 영상을 3~600초로 확장하고 시작/끝의 동일한 2.4초 사건을 처리합니다. 실제 ordinal/PTS·24프레임 분석·기존 후보/검토 흐름을 유지하며 초기 Python peak·packed payload·프로토콜 문자 수·도구 시간·논리 hash 읽기량·자체 RAM·표본 임시 용량을 구분합니다. 실제 영상이나 모델을 받는 성능 평가 도구는 아닙니다.
 
 ## 4. Reproducibility
 
@@ -231,6 +241,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 | 분석 연결 | 원본 축 ≤1024·640×640 letterbox·프레임당 탐지 ≤64 |
 | 검토 MP4 | 선택 프레임 ≤120·원본 축 ≤1024·제한된 time base·무음 coded view·고정 짝수 캔버스 |
 | 입력 재생 | 한 차량·JSON ≤1 MiB·입력/디코딩 구간 ≤120프레임·단일 원본/시간축 |
+| 시간축 | 전체 프레임 순차 검사·일반 경로 16바이트/프레임 보관, 영상 길이 상한/일정 RAM 보장 아님 |
 | 결과/복구 | 원본·기존 결과 덮어쓰기 금지·오류/취소 시 소유 임시 자원 정리 |
 
 HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네트워크/재분석 지점·상위 경로(`..`)는 지원하지 않습니다. 마지막 포함 프레임의 표시 길이는 요청 끝을 넘을 수 있습니다. 강제 종료 후에는 해당 작업의 `.crd-*.partial`만 확인하고 새 이름으로 재시도하세요. 현재 전체 원본을 여러 번 읽고 디코딩하므로 장시간 성능은 검증이 필요합니다.
@@ -241,11 +252,12 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 245개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사·자원 진단·평가기·그림 출처 검사 |
+| 공개 테스트 | 267개 PASS | CLI·추적·검토·사건/입력 재생·원본 검사·자원 진단·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
-| 자원 확장 | 10·60·300초 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
+| 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
+| 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
 | 평가기 | 작은 그래프 128개 exhaustive oracle 대조 | 최대 cardinality/최소 비용·중복/미탐·0분모 검사, 실차 정확도 아님 |
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |
@@ -256,15 +268,18 @@ FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어�
 
 `benchmark_events --no-reuse`와 기본 실행은 각기 새 Python 프로세스에서 비교하세요. 2.4초 자체 합성 영상의 원본 metadata/timeline 호출은 각각 4→1회, SHA-256은 7→7회, 완전 원본 디코딩은 1→1회였습니다. 전체 파일 시간축·원본 픽셀 디코딩은 여전히 필요하며 이 호출 감소를 실영상 속도 배율이나 장시간 처리 수락으로 해석하지 않습니다.
 
-확장 진단의 tail·재사용 on 대표 관측은 다음과 같습니다(각 조건 새 프로세스 1회, 96×64·10fps·무음 CFR).
+동일한 96×64·10fps·무음 CFR 합성 원본의 **검사 단계만** 비교한 Python allocation peak입니다. 조건마다 새 프로세스에서 기존 JSON/tuple 구현과 순차/packed 구현을 각각 측정했습니다. 생성·모듈 import는 측정에서 제외했으며 프로세스 전체 RAM이나 사건 처리 peak가 아닙니다.
 
-| 원본 길이 | 전체 프레임 | 시간축 JSON 문자 수 | 초기 검사 Python peak |
-| --- | --- | --- | --- |
-| 10초 | 100 | 16,281 | 0.25 MiB |
-| 60초 | 600 | 97,281 | 0.49 MiB |
-| 300초 | 3,000 | 488,104 | 1.66 MiB |
+| 원본 길이 | 전체 프레임 | JSON/tuple peak | 순차/packed peak | 보관 payload |
+| --- | --- | --- | --- | --- |
+| 10초 | 100 | 0.092 MiB | 0.043 MiB | 1,600 bytes |
+| 60초 | 600 | 0.334 MiB | 0.043 MiB | 9,600 bytes |
+| 300초 | 3,000 | 1.500 MiB | 0.104 MiB | 48,000 bytes |
+| 600초 | 6,000 | 2.959 MiB | 0.197 MiB | 96,000 bytes |
 
-분석 raw는 모두 432 KiB로 고정됐지만 전체 시간축 검사 메모리는 증가했습니다. 이 진단은 초기 검사 1회를 추가하므로 metadata/timeline 호출이 off/on 각각 5→1회이며 원본 hash7회·완전 decode1회·픽셀 decode2회는 유지됩니다. Python peak는 tracemalloc 관측으로 native RAM과 다르고 JSON 문자 수는 메모리 bytes가 아닙니다. 실행 시간에는 계측 overhead가 포함되며 생성 시간·자식 RAM/VRAM은 제외합니다. OS cache·백그라운드 부하가 통제되지 않아 속도 배율이나 HD/실영상 지원을 주장하지 않습니다.
+비교 기준은 [기존 시간축 구현](https://github.com/jhpark-jarvis/cheating-racer-detect/blob/bf6eea3ac59f4c685d04fd56766eb4fd49276f76/cheating_racer_detect/media.py)이며 모든 원본 프레임을 검사했습니다. 300초 조건의 추가 역순 반복에서도 peak는 각각 1.500/0.104 MiB였습니다. 약 93% 감소는 이 검사 단계의 Python allocation에 한정합니다. [자동 비교 시험](tests/test_streaming_timeline.py), [실제 미디어 동등성 시험](tests/test_streaming_timeline_native.py)
+
+전체 사건 진단에서도 300/600초의 head/tail에서 분석 raw 432 KiB·검토14프레임·원본 hash7회·완전 decode1회·픽셀 decode2회를 유지했습니다. 진단용 초기 검사 1회가 추가돼 metadata/timeline 호출은 off/on 각각 5→1회입니다. 프로토콜 문자 수·packed payload·tracemalloc peak는 서로 다른 측정이며 자식 RAM/VRAM은 제외합니다. OS cache·백그라운드 부하와 계측 overhead가 통제되지 않아 속도 배율이나 HD/실영상 지원을 주장하지 않습니다.
 
 ## 6. Limitations and Planned Work
 
