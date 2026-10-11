@@ -38,12 +38,12 @@ def generate(tools, root):
     return source
 
 
-def observation():
+def observation(*, first=0):
     motion = MotionConfig((4., 4., .02, .02), (.25, .25, .0025, .0025),
                           (1., 1., .1, .1, 100., 100., 1., 1.))
     tracker = Tracker(Policy(F(3, 5), F(3, 10), .2, .7, .2, .95, (2,), motion))
     def observe(frame, pixels):
-        x = POSITIONS[frame.ordinal]
+        x = POSITIONS[frame.ordinal-first]
         return tracker.update(frame, [Detection(0, 2, Box(x-12, 10, x+12, 30), .9, 'scripted-event', frame)])
     return observe
 
@@ -53,14 +53,19 @@ def event_configs():
             LampConfig('synthetic-event-v1', 50., 180., 8, F(3, 5), F(3, 10), F(1, 10), F(1), 1))
 
 
-def analyze(source, tools, root, *, capture=None):
+def analyze(source, tools, root, *, capture=None, start=Decimal(0), end=Decimal('2.4')):
     lane_config, lamp_config = event_configs()
     lane, lamp = LaneEngine(lane_config), LampEngine(lamp_config)
-    video, timeline, frames, first, rotation = prepare(source, Decimal(0), Decimal('2.4'), tools)
+    video, timeline, frames, first, rotation = prepare(source, start, end, tools)
+    if len(frames) != len(POSITIONS):
+        raise ValueError('Synthetic scenario requires exactly 24 selected frames')
     raw = root/'decoded.bgr'
     run_tool([tools.ffmpeg, '-nostdin', '-v', 'error', '-noautorotate', '-i', source,
+              '-vf', f'select=between(n\\,{first}\\,{first+len(frames)-1})',
               '-fps_mode', 'passthrough', '-an', '-pix_fmt', 'bgr24', '-f', 'rawvideo', raw])
-    observe, events = observation(), []
+    if raw.stat().st_size != video['width']*video['height']*3*len(frames):
+        raise ValueError('Synthetic selected pixels do not match the source timeline')
+    observe, events = observation(first=first), []
     source_hash = _sha256(source)
     with raw.open('rb') as stream:
         for n, item in enumerate(frames):

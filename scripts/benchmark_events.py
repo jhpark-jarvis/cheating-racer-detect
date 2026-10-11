@@ -46,10 +46,23 @@ class DiskSampler:
     def __init__(self, root, interval=.02):
         self.root, self.interval = root, interval
         self.peak = self.partial_peak = self.samples = 0
+        self.lock = threading.RLock()
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.run, name='crd-owned-disk-sampler', daemon=True)
 
     def sample(self):
+        with self.lock:
+            self._sample()
+
+    def publish(self, function, *args):
+        """Do not hold diagnostic directory handles across a Windows rename.
+
+        Only serialize our observer; no production retry or error suppression.
+        """
+        with self.lock:
+            return function(*args)
+
+    def _sample(self):
         total = partial = 0
         for path in self.root.rglob('*'):
             try:
@@ -101,7 +114,7 @@ def benchmark(*, reuse=True):
         source = demo_events.generate(toolchain, root)
         output = root/'result'
         calls, hash_reads = Counter(), 0
-        actual_tool, actual_hash = tools.run_tool, service._sha256
+        actual_tool, actual_hash, actual_publish = tools.run_tool, service._sha256, service._publish
         def run(args, **kwargs):
             calls[classify(args, source, toolchain)] += 1
             return actual_tool(args, **kwargs)
@@ -114,6 +127,8 @@ def benchmark(*, reuse=True):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=run))
             for module in (service, video, export, demo_events):
                 stack.enter_context(patch.object(module, '_sha256', side_effect=hash_file))
+            for module in (service, video, export):
+                stack.enter_context(patch.object(module, '_publish', side_effect=lambda *args: disk.publish(actual_publish, *args)))
             start = time.perf_counter()
             candidate, lamps = demo_events.analyze(source, toolchain, root)
             analyzed = time.perf_counter()
@@ -131,6 +146,7 @@ def benchmark(*, reuse=True):
                 'memory': memory, 'native_child_peak_ram': 'NOT_MEASURED', 'vram': 'NOT_MEASURED',
                 'owned_tree_sampled_peak_bytes': disk.peak, 'partial_tree_sampled_peak_bytes': disk.partial_peak,
                 'disk_sample_interval_seconds': disk.interval, 'disk_samples': disk.samples,
+                'disk_sampling_serialized_with_publication': True,
                 'final_output_bytes': final_bytes, 'source_sha256_reads': hash_reads, 'tool_calls': dict(sorted(calls.items())),
                 'review_frames': mapping['review']['frame_count'], 'signal_state': report['signal_state'],
                 'limits': ['fresh Python process recommended; OS file cache uncontrolled',
