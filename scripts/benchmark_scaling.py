@@ -115,8 +115,9 @@ def benchmark(*, seconds=60, window='tail', reuse=True):
         actual_publish = service._publish
         start_time = Decimal(seconds)-Decimal('2.4') if window == 'tail' else Decimal(0)
         end_time = start_time+Decimal('2.4')
-        with DiskSampler(root) as disk, ExitStack() as stack, allocation_trace(), source_session(reuse=reuse):
-            for module in (tools, media, video, demo_events):
+        from cheating_racer_detect import pixels
+        with DiskSampler(root) as disk, ExitStack() as stack, allocation_trace(), source_session(reuse=reuse, pixel_parent=root):
+            for module in (tools, media, video, demo_events, pixels):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=metrics.run))
             for module in (tools, media):
                 stack.enter_context(patch.object(module, 'run_tool_lines', side_effect=metrics.run_lines))
@@ -147,7 +148,9 @@ def benchmark(*, seconds=60, window='tail', reuse=True):
                 'window': window, 'analysis_range': [str(start_time), str(end_time)],
                 'source_inspection_reuse': reuse, 'source_frames': source_frames,
                 'analysis_frames': len(demo_events.POSITIONS), 'analysis_first_ordinal': first,
-                'analysis_raw_bytes': (root/'decoded.bgr').stat().st_size,
+                'analysis_raw_bytes': len(demo_events.POSITIONS)*96*64*3,
+                'analysis_raw_bytes_definition': 'validated selected BGR payload; owned window removed at job exit',
+                'pixel_storage_in_sampled_tree': True,
                 'review_frames': mapping['review']['frame_count'],
                 'review_first_ordinal': mapping['frames'][0]['source_frame']['ordinal'],
                 'review_last_ordinal': mapping['frames'][-1]['source_frame']['ordinal'],

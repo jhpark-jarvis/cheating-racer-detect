@@ -157,7 +157,8 @@ class ActualMedia(unittest.TestCase):
                         or (phase == 'encode' and arguments[-1].name == 'review.mp4')):
                     raise AppError('EXTRACTION_FAILED', 'Injected media failure')
                 return actual_tool(arguments, **kwargs)
-            with patch.object(video, 'run_tool', side_effect=execute), self.assertRaises(AppError):
+            with patch.object(video, 'run_tool', side_effect=execute), \
+                    patch('cheating_racer_detect.pixels.run_tool', side_effect=execute), self.assertRaises(AppError):
                 export_review(source, 0, '.2', failed, ScriptedObserver(), TOOLS)
             self.assertFalse(failed.exists())
             self.assertEqual(list(self.root.glob('.crd-review-*.partial')), [])

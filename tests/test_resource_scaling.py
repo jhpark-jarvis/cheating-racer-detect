@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from cheating_racer_detect.tools import Toolchain
+from cheating_racer_detect.errors import AppError
 from cheating_racer_detect.media import Frame, Timeline
 from fractions import Fraction as F
 from scripts import benchmark_scaling as scaling
@@ -179,14 +180,11 @@ class Diagnostic(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     scaling.demo_events.analyze(root/'source', tools, root)
                 run.assert_not_called()
-            def bad_pixels(*args, **kwargs):
-                (root/'decoded.bgr').write_bytes(b'partial frame')
             with patch.object(scaling.demo_events, 'prepare', return_value=(video, timeline, frames, 0, 0)), \
-                    patch.object(scaling.demo_events, 'run_tool', side_effect=bad_pixels), \
-                    patch.object(scaling.demo_events, 'observation') as observe:
-                with self.assertRaises(ValueError):
+                    patch.object(scaling.demo_events, '_sha256', return_value='mock'), \
+                    patch.object(scaling.demo_events, 'pixel_window', side_effect=AppError('OUTPUT_INVALID', 'short pixels')):
+                with self.assertRaises(AppError):
                     scaling.demo_events.analyze(root/'source', tools, root)
-                observe.assert_not_called()
 
 
 if __name__ == '__main__':

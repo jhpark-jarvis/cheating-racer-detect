@@ -10,6 +10,7 @@ import tempfile
 
 from ..errors import AppError
 from ..paths import destination_path, local_path, source_path
+from ..pixels import pixel_window
 from ..service import _identity, _publish, _sha256, create_clip
 from ..source import inspect_source, source_job
 from ..tools import discover_tools, run_tool
@@ -51,38 +52,25 @@ def prepare(source, start, end, tools):
     return video, timeline, selected, first, _rotation(video, 'UNSUPPORTED_MEDIA')
 
 
-def build(source, start, end, stage, observe, tools, source_hash):
-    """Same selected decoded pixels -> callback -> validated, owned review records."""
-    from ..media import _full_decode, _input_options, _probe, _profile, _timeline
-
-    video, timeline, selected, first, rotation = prepare(source, start, end, tools)
-    original = create_clip(source, start, end, stage/'original', tools)
-    if original['source']['sha256'] != source_hash:
-        raise AppError('INPUT_CHANGED', '처리 중 원본이 변경되었습니다.')
-    raw = stage/'source.bgr'
-    run_tool([tools.ffmpeg, '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
-              *_input_options(), '-noautorotate', '-i', source, '-map', '0:v:0',
-              '-vf', f'select=between(n\\,{first}\\,{first+len(selected)-1})',
-              '-fps_mode', 'passthrough', '-an', '-pix_fmt', 'bgr24', '-f', 'rawvideo', raw], timeout=120)
+def _render_window(stream, video, timeline, selected, first, rotation, stage, observe, source_hash):
+    """Two readonly passes over the same owned window, no duplicate raw file."""
     size = video['width']*video['height']*3
-    if raw.stat().st_size != size*len(selected):
-        raise AppError('OUTPUT_INVALID', '선택 프레임과 디코딩 결과가 일치하지 않습니다.')
+    offset = stream.tell()
     frames, reports, summaries = [], [], []
     height = 0
     scale = min(4, max(1, 640//video['width']))
     width = max(880, video['width']*scale+480)
-    with raw.open('rb') as stream:
-        for index, item in enumerate(selected):
-            frame = Frame(source_hash, video['index'], first+index, item.pts,
-                          timeline.time_base, timeline.frames[0].pts,
-                          video['width'], video['height'], rotation)
-            pixels = stream.read(size)
-            report = json.loads(json.dumps(observe(frame, pixels), allow_nan=False))
-            summary = summarize(frame, report)
-            height = max(height, 186+max(video['height']*scale, 26+18*len(summary['annotations'])))
-            frames.append(frame)
-            reports.append(report)
-            summaries.append(summary)
+    for index, item in enumerate(selected):
+        frame = Frame(source_hash, video['index'], first+index, item.pts,
+                      timeline.time_base, timeline.frames[0].pts,
+                      video['width'], video['height'], rotation)
+        pixels = stream.read(size)
+        report = json.loads(json.dumps(observe(frame, pixels), allow_nan=False))
+        summary = summarize(frame, report)
+        height = max(height, 186+max(video['height']*scale, 26+18*len(summary['annotations'])))
+        frames.append(frame)
+        reports.append(report)
+        summaries.append(summary)
     width, height = (width+1)//2*2, (height+1)//2*2
     # Stage only one frame in RAM; fixed canvas prevents geometry reinitialization.
     try:
@@ -92,12 +80,27 @@ def build(source, start, end, stage, observe, tools, source_hash):
             raise
         raise AppError('DEPENDENCY_MISSING', '검토 렌더링에는 tracking 선택 의존성이 필요합니다.') from error
     rendered = stage/'review.bgr'
-    with raw.open('rb') as stream, rendered.open('xb') as destination:
+    stream.seek(offset)
+    with rendered.open('xb') as destination:
         for frame, report in zip(frames, reports):
             image, _summary = render(frame, stream.read(size), report)
             canvas = np.full((height, width, 3), 22, np.uint8)
             canvas[:image.shape[0], :image.shape[1]] = image
             destination.write(canvas.tobytes())
+    return frames, summaries, width, height, rendered
+
+
+def build(source, start, end, stage, observe, tools, source_hash):
+    """Same selected decoded pixels -> callback -> validated, owned review records."""
+    from ..media import _full_decode, _probe, _profile, _timeline
+
+    video, timeline, selected, first, rotation = prepare(source, start, end, tools)
+    original = create_clip(source, start, end, stage/'original', tools)
+    if original['source']['sha256'] != source_hash:
+        raise AppError('INPUT_CHANGED', '처리 중 원본이 변경되었습니다.')
+    with pixel_window(source, tools, video, timeline, first, len(selected)) as stream:
+        frames, summaries, width, height, rendered = _render_window(
+            stream, video, timeline, selected, first, rotation, stage, observe, source_hash)
     denominator = timeline.time_base.denominator
     ticks = [(f.pts-selected[0].pts)*timeline.time_base.numerator for f in selected]
     last_ticks = selected[-1].duration*timeline.time_base.numerator

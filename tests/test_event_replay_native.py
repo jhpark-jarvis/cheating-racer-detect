@@ -66,7 +66,7 @@ class Native(unittest.TestCase):
             vehicle = replace(row.vehicle, frame=frame, detection=replace(row.vehicle.detection, frame=frame))
             bad = replace(inputs, rows=inputs.rows[:5]+(replace(row, frame=frame, vehicle=vehicle,
                           lanes=replace(row.lanes, frame=frame)),)+inputs.rows[6:])
-            with patch('cheating_racer_detect.events.replay.run_tool') as decode:
+            with patch('cheating_racer_detect.pixels.run_tool') as decode:
                 with self.assertRaises(AppError):
                     analyze_inputs(source, bad, TOOLS)
                 decode.assert_not_called()

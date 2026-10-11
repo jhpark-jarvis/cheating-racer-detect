@@ -126,8 +126,9 @@ def benchmark(*, reuse=True):
             nonlocal hash_reads
             hash_reads += path == source
             return actual_hash(path)
-        with DiskSampler(root) as disk, ExitStack() as stack, source_session(reuse=reuse):
-            for module in (tools, media, video, demo_events):
+        from cheating_racer_detect import pixels
+        with DiskSampler(root) as disk, ExitStack() as stack, source_session(reuse=reuse, pixel_parent=root):
+            for module in (tools, media, video, demo_events, pixels):
                 stack.enter_context(patch.object(module, 'run_tool', side_effect=run))
             for module in (tools, media):
                 stack.enter_context(patch.object(module, 'run_tool_lines', side_effect=run_lines))

@@ -14,6 +14,7 @@ from cheating_racer_detect.events import LaneConfig, LaneEngine, LaneSection, Ve
 from cheating_racer_detect.events.export import export_candidate
 from cheating_racer_detect.events.lamp import LampConfig, LampEngine, LampROI
 from cheating_racer_detect.paths import local_path
+from cheating_racer_detect.pixels import pixel_window
 from cheating_racer_detect.review.video import prepare
 from cheating_racer_detect.service import _sha256
 from cheating_racer_detect.tools import discover_tools, run_tool
@@ -59,15 +60,9 @@ def analyze(source, tools, root, *, capture=None, start=Decimal(0), end=Decimal(
     video, timeline, frames, first, rotation = prepare(source, start, end, tools)
     if len(frames) != len(POSITIONS):
         raise ValueError('Synthetic scenario requires exactly 24 selected frames')
-    raw = root/'decoded.bgr'
-    run_tool([tools.ffmpeg, '-nostdin', '-v', 'error', '-noautorotate', '-i', source,
-              '-vf', f'select=between(n\\,{first}\\,{first+len(frames)-1})',
-              '-fps_mode', 'passthrough', '-an', '-pix_fmt', 'bgr24', '-f', 'rawvideo', raw])
-    if raw.stat().st_size != video['width']*video['height']*3*len(frames):
-        raise ValueError('Synthetic selected pixels do not match the source timeline')
     observe, events = observation(first=first), []
     source_hash = _sha256(source)
-    with raw.open('rb') as stream:
+    with pixel_window(source, tools, video, timeline, first, len(frames), complete=True) as stream:
         for n, item in enumerate(frames):
             frame = Frame(source_hash, video['index'], first+n, item.pts, timeline.time_base,
                           timeline.frames[0].pts, video['width'], video['height'], rotation)

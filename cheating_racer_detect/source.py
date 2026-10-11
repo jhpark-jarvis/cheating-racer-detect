@@ -1,6 +1,6 @@
 """Job-local source inspection reuse; never a persistent or caller-trusted cache.
 
-Only metadata and frozen video timelines are memoized. Existing SHA-256,
+Metadata, frozen video timelines and one bounded owned pixel window are reused. Existing SHA-256,
 complete source decode and independent derived-output checks remain mandatory.
 """
 
@@ -24,10 +24,24 @@ class _Job:
     active: bool = True
     snapshot: tuple | None = None
     failed: bool = False
+    pixels: object | None = None
+    pixel_parent: object | None = None
+
+    def clear(self):
+        self.snapshot = None
+        pixels, self.pixels = self.pixels, None
+        if pixels is not None:
+            pixels.close()
+
+
+def active_job():
+    """Internal synchronous owner only; expired/copied/threaded scopes are ignored."""
+    job = _ACTIVE.get()
+    return job if job is not None and job.active and job.thread == threading.get_ident() else None
 
 
 @contextmanager
-def source_session(*, reuse=True):
+def source_session(*, reuse=True, pixel_parent=None):
     """Internal synchronous scope. Nested jobs inherit the outer reuse policy."""
     job = _ACTIVE.get()
     if job is not None and job.active and job.thread == threading.get_ident():
@@ -36,17 +50,19 @@ def source_session(*, reuse=True):
         except BaseException:
             # A caller may catch an inner failure and retry within its outer
             # scope. Never retain the failed workflow's prior inspection.
-            job.snapshot = None
+            job.clear()
             raise
         return
-    job = _Job(reuse, threading.get_ident())
+    job = _Job(reuse, threading.get_ident(), pixel_parent=pixel_parent)
     token = _ACTIVE.set(job)
     try:
         yield job
     finally:
         job.active = False
-        job.snapshot = None
-        _ACTIVE.reset(token)
+        try:
+            job.clear()
+        finally:
+            _ACTIVE.reset(token)
 
 
 def source_job(function):

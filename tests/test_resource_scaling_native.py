@@ -40,7 +40,7 @@ class Native(unittest.TestCase):
                     calls = result['tool_calls']
                     self.assertEqual(calls['source_metadata_probe'], 1 if reuse else 5)
                     self.assertEqual(calls['source_timeline_probe'], 1 if reuse else 5)
-                    for key, count in (('source_full_decode', 1), ('source_raw_decode', 2),
+                    for key, count in (('source_full_decode', 1), ('source_raw_decode', 1 if reuse else 2),
                             ('derived_metadata_probe', 2), ('derived_timeline_probe', 2), ('derived_full_decode', 2)):
                         self.assertEqual(calls[key], count)
                     self.assertGreater(result['source_timeline_stdout_characters'], 0)

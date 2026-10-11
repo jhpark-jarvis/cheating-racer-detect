@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR
 import json
 from pathlib import Path
-import tempfile
 
 from ..errors import AppError
 from ..paths import local_path, source_path
+from ..pixels import pixel_window
 from ..review.video import prepare
 from ..service import _identity, _sha256
 from ..source import source_job
-from ..tools import discover_tools, run_tool
+from ..tools import discover_tools
 from ..tracking.contracts import integer
 from .export import decimal_bound, export_candidate, validate_frame
 from .inputs import EventInputs, owned_output, write_bytes
@@ -48,26 +48,17 @@ def _analyze_inputs(input_path, inputs, toolchain):
         validate_frame(row.frame, source_hash, video, timeline, rotation)
     lane, lamp = LaneEngine(inputs.lane_config), LampEngine(inputs.lamp_config)
     events, rows = [], {row.frame.ordinal: row for row in inputs.rows}
-    with tempfile.TemporaryDirectory(prefix='crd-input-replay-') as directory:
-        raw = Path(directory)/'source.bgr'
-        from ..media import _input_options
-        run_tool([tools.ffmpeg, '-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
-                  *_input_options(), '-noautorotate', '-i', source, '-map', '0:v:0',
-                  '-vf', f'select=between(n\\,{ordinal}\\,{ordinal+len(selected)-1})',
-                  '-fps_mode', 'passthrough', '-an', '-pix_fmt', 'bgr24', '-f', 'rawvideo', raw], timeout=120)
+    with pixel_window(source, tools, video, timeline, ordinal, len(selected), complete=True) as stream:
         size = first.width*first.height*3
-        if raw.stat().st_size != size*len(selected):
-            raise AppError('OUTPUT_INVALID', '원본 프레임과 디코딩 결과가 다릅니다.')
-        with raw.open('rb') as stream:
-            for n in range(len(selected)):
-                pixels = stream.read(size)
-                row = rows.get(ordinal+n)
-                if row is None:
-                    continue  # Missing annotated frames are NOT filled in.
-                event = lane.update(row.frame, row.vehicle, row.lanes)['candidate']
-                lamp.update(row.frame, row.vehicle, pixels, row.left, row.right)
-                if event is not None:
-                    events.append(event)
+        for n in range(len(selected)):
+            pixels = stream.read(size)
+            row = rows.get(ordinal+n)
+            if row is None:
+                continue  # Missing annotated frames are NOT filled in.
+            event = lane.update(row.frame, row.vehicle, row.lanes)['candidate']
+            lamp.update(row.frame, row.vehicle, pixels, row.left, row.right)
+            if event is not None:
+                events.append(event)
     local_path(source)
     if before != _identity(source) or source_hash != _sha256(source):
         raise AppError('INPUT_CHANGED', '재생 중 원본 영상이 변경되었습니다.')
