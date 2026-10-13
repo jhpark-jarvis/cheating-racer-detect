@@ -74,6 +74,14 @@ def children(api, parent_pid: int) -> list[tuple[int, str]]:
         owned.update(pid for pid, _ in added)
 
 
+def require_children_exited(api, observed, phase):
+    """Keep the existing 3s condition; distinguish timeout from API failure."""
+    for handle, name in observed.values():
+        status = api.WaitForSingleObject(handle, 3000)
+        if status != 0:
+            raise AssertionError(f'Owned {phase} child exit check failed: name={name}, wait_status={status}')
+
+
 def main() -> int:
     source, output, tools_dir = map(Path, sys.argv[1:4])
     force = sys.argv[4:] == ['--force']
@@ -156,9 +164,7 @@ def main() -> int:
                 raise AssertionError(f"Expected cancellation; got exit={process.returncode}, code={response.get('code')}")
             if output.exists() or set(output.parent.glob(".crd-*.partial")) != before:
                 raise AssertionError("Cancellation left a final result or owned temporary directory")
-        for handle, _ in observed.values():
-            if api.WaitForSingleObject(handle, 3000) != 0:
-                raise AssertionError("An owned media child survived cancellation")
+        require_children_exited(api, observed, 'cancel')
         retry_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                          env=environment, creationflags=subprocess.CREATE_NO_WINDOW)
         retry_deadline = time.monotonic() + 30
@@ -170,8 +176,7 @@ def main() -> int:
         retry_process.communicate()
         if retry_process.returncode or not (output / "result.json").is_file():
             raise AssertionError("Retry of the same output after cancellation failed")
-        if any(api.WaitForSingleObject(handle, 3000) != 0 for handle, _ in retry_observed.values()):
-            raise AssertionError("An owned retry child survived completion")
+        require_children_exited(api, retry_observed, 'retry')
         if force:
             if set(output.parent.glob('.crd-*.partial')) != before | set(leftovers):
                 raise AssertionError('Retry changed another invocation crash residue')
