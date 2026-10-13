@@ -33,6 +33,27 @@ def validate_frame(frame, source_hash, video, timeline, rotation):
         raise AppError('INVALID_CANDIDATE', '후보 관측과 원본 영상의 시간·출처가 일치하지 않습니다.')
 
 
+def candidate_context(candidate, pre, post, timeline, lamps):
+    """Internal exact planned context shared by catalogue and media export.
+
+    Callers verify source-bound candidates/lamp frames; this does not validate
+    or create media. Inclusive lamp endpoint evidence widens the clip only.
+    """
+    duration = (timeline.frames[-1].pts-timeline.frames[0].pts+timeline.frames[-1].duration)*timeline.time_base
+    start = max(Fraction(0), candidate.start[0].time-pre)
+    end = min(duration, candidate.completion[1].time+post)
+    if end <= candidate.completion[1].time:
+        raise AppError('INVALID_CANDIDATE', '후보 완료 프레임의 길이를 확인하지 못했습니다.')
+    requested = [str(start), str(end)]
+    lamp = None if lamps is None else lamps.report(start, end)
+    if lamp is not None:
+        for sample in lamp['samples']:
+            item = timeline.frames[sample['vehicle']['frame']['ordinal']]
+            start = min(start, (item.pts-timeline.frames[0].pts)*timeline.time_base)
+            end = max(end, (item.pts+item.duration-timeline.frames[0].pts)*timeline.time_base)
+    return start, end, requested, lamp
+
+
 @source_job
 def export_candidate(input_path, candidate, output_path, observe, *, pre, post, lamps=None, toolchain=None):
     """Explicit positive pre/post seconds; all outputs publish or none do.
@@ -58,26 +79,12 @@ def export_candidate(input_path, candidate, output_path, observe, *, pre, post, 
         anchors = set(candidate.start+candidate.crossing+candidate.completion)
         for frame in anchors:
             validate_frame(frame, source_hash, video, timeline, rotation)
-        duration = timeline.frames[-1].pts*timeline.time_base-timeline.frames[0].pts*timeline.time_base+timeline.frames[-1].duration*timeline.time_base
-        start = max(Fraction(0), candidate.start[0].time-pre)
-        end = min(duration, candidate.completion[1].time+post)
-        if end <= candidate.completion[1].time:
-            raise AppError('INVALID_CANDIDATE', '후보 완료 프레임의 길이를 확인하지 못했습니다.')
-        requested_context = [str(start), str(end)]
-        lamp = None
         if lamps is not None:
             if lamps.identity is not None and lamps.identity != candidate.identity:
                 raise AppError('INVALID_CANDIDATE', '램프와 후보의 차량 이력이 다릅니다.')
             for frame in lamps.frames():
                 validate_frame(frame, source_hash, video, timeline, rotation)
-            lamp = lamps.report(start, end)
-            # Inclusive lamp windows may bracket a boundary with a frame just
-            # outside the requested half-open clip. Include those evidence pixels
-            # too, without changing the configured lamp window or claiming coverage.
-            for sample in lamp['samples']:
-                item = timeline.frames[sample['vehicle']['frame']['ordinal']]
-                start = min(start, (item.pts-timeline.frames[0].pts)*timeline.time_base)
-                end = max(end, (item.pts+item.duration-timeline.frames[0].pts)*timeline.time_base)
+        start, end, requested_context, lamp = candidate_context(candidate, pre, post, timeline, lamps)
         stage = Path(tempfile.mkdtemp(prefix='.crd-candidate-', suffix='.partial', dir=output.parent))
         owner = _identity(stage)[:2]
         seen = set()

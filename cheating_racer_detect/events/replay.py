@@ -132,12 +132,14 @@ def _selection(value):
 
 
 @source_job
-def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, toolchain=None):
+def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, toolchain=None, catalog=None):
     """Analyze once; publish all explicitly selected bundles or none.
 
     Caller order and zero-based replay indices are preserved. Empty, duplicate
     or invalid selections fail; no implicit all-candidates or partial success.
     Each candidate still runs its original full media/hash/output checks.
+    An optional immutable catalogue must match a newly replayed full summary;
+    it never substitutes for analysis and is copied with its canonical hash.
     """
     indices = _selection(candidate_indices)
     if not isinstance(inputs, EventInputs):
@@ -148,7 +150,20 @@ def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, t
     tools = toolchain or discover_tools()
     try:
         before, source_hash = _identity(source), _sha256(source)
+        if catalog is not None:
+            from .catalog import CandidateCatalog, make_catalog
+            if type(catalog) is not CandidateCatalog:
+                raise AppError('INVALID_CATALOG', '검증된 후보 목록이 필요합니다.')
+            reference = catalog.report()
+            if reference['source_sha256'] != source_hash or reference['inputs_sha256'] != inputs.sha256:
+                raise AppError('CATALOG_CHANGED', '후보 목록과 원본·관측 입력이 다릅니다. 목록을 다시 생성하세요.')
         analysis = analyze_inputs(source, inputs, tools)
+        if catalog is not None:
+            from ..source import inspect_source
+            _video, _audio, timeline = inspect_source(source, tools, max_axis=1024)
+            current = make_catalog(inputs, analysis, timeline)
+            if catalog.to_bytes() != current.to_bytes():
+                raise AppError('CATALOG_CHANGED', '후보 목록과 새 재생 결과가 다릅니다. 목록을 다시 생성하세요.')
         if any(index >= len(analysis.candidates) for index in indices):
             raise AppError('INVALID_CANDIDATE', '재생 결과에 해당 후보가 없습니다. 모든 후보 번호를 확인하세요.')
         with owned_output(output_path) as stage:
@@ -170,6 +185,10 @@ def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, t
                                  'selected actual vehicle only; no re-tracking', 'identity unverified',
                                  'content hash is not authentication', 'not a violation decision',
                                  'all selected candidates or none; no partial success']}
+            if catalog is not None:
+                write_bytes(stage/'catalog.json', catalog.to_bytes())
+                result['catalog'] = 'catalog.json'
+                result['catalog_sha256'] = catalog.sha256
             write_bytes(stage/'batch.json', (json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)+'\n').encode('utf-8'))
             local_path(source)
             if before != _identity(source) or source_hash != _sha256(source):
