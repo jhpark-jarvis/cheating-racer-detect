@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 
 from cheating_racer_detect.events import LaneSection, Vehicle
+from cheating_racer_detect.events.catalog import export_catalog, load_catalog
 from cheating_racer_detect.events.inputs import EventInputs, InputFrame, load_inputs, save_inputs
 from cheating_racer_detect.events.lamp import LampROI
 from cheating_racer_detect.events.replay import export_replay_batch
@@ -66,8 +67,10 @@ def demonstrate(output, tools=None):
         root = Path(directory)
         source, inputs = generate_inputs(tools, root)
         save_inputs(inputs, root/'saved')
-        return export_replay_batch(source, load_inputs(root/'saved'/'inputs.json'), output,
-                                   candidate_indices=(0, 1), toolchain=tools)
+        restored = load_inputs(root/'saved'/'inputs.json')
+        export_catalog(source, restored, root/'listed', toolchain=tools)
+        return export_replay_batch(source, restored, output, candidate_indices=(0, 1), toolchain=tools,
+                                   catalog=load_catalog(root/'listed'/'catalog.json'))
 
 
 def main():
