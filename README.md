@@ -203,6 +203,14 @@ replay-batch-001/
 
 모든 선택 결과와 기록이 검증된 뒤 새 최종 폴더를 한 번 확정합니다. 중간 후보의 오류·취소·정리 실패에는 전체 묶음을 확정하지 않으며 기존 결과를 덮어쓰지 않습니다. 소유권이 불확실한 임시 자원은 삭제하지 않고 오류로 알립니다. 실패 후 같은 미생성 출력 이름으로 새 작업을 재시도할 수 있습니다. 후보 수만큼 출력량과 원본 검증 비용이 증가하며, 픽셀 재사용은 기존 포함 구간·정리 규칙에 한정됩니다. [원자적 확정 시험](tests/test_batch_replay.py), [실제 두 후보·명령 검증](tests/test_batch_replay_native.py)
 
+### 3.11 Candidate catalogue and verified selection
+
+[`export_catalog`](cheating_racer_detect/events/catalog.py)는 원본 픽셀로 입력을 재생하고 후보 번호·방향·정규화된 원본 시간의 시작/교차/완료 bracket·예정 맥락·좌우 점멸 사실과 `unknown` 사유를 기록합니다. 새 폴더에는 `inputs.json`과 `catalog.json`만 저장하며 검토 영상을 인코딩하지 않습니다. 후보가 없으면 빈 목록을 반환하지만 이를 정상 주행이나 신호 사용으로 판정하지 않습니다.
+
+목록은 입력/원본 해시·공통 Frame 출처·후보별 canonical report 해시를 포함하는 최대 1 MiB의 immutable receipt입니다. partial blink와 관측 불능을 함께 보존합니다. 시간/맥락은 예정 구간이고 클립 검증 결과가 아닙니다. 목록 명령도 실제 원본 PTS·전체 비디오 디코딩과 해시를 검사하며, 음성/클립 검증은 후속 내보내기에서 수행합니다.
+
+`export_replay_batch(..., catalog=load_catalog("catalog.json"))`는 원본·입력 해시를 먼저 확인하고 **새 재생의 전체 목록**을 다시 대조합니다. 순서·시각·신호·후보 내용이 달라지면 영상 생성 전에 `CATALOG_CHANGED`로 중단합니다. 일치하면 canonical 목록과 해시를 검토 묶음에 함께 저장합니다. 해시는 인증·서명이 아니고 목록은 분석 캐시가 아닙니다. 목록과 내보내기는 별도 작업이며 각각 원본을 분석합니다. 기존 단일/목록 없는 일괄 호출은 유지됩니다. [목록 계약 시험](tests/test_candidate_catalog.py), [실제 목록→선택→클립 검증](tests/test_candidate_catalog_native.py)
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -262,6 +270,15 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 
 두 선택 옵션은 함께 사용할 수 없습니다. 후보 번호는 `analyze_inputs(source, inputs).candidates`의 순서입니다. 일괄 API의 `candidate_indices`는 중복 없는 정수 list/tuple(1~120개)이며, CLI도 같은 선택 규칙을 적용합니다. [일괄 합성 데모](scripts/demo_batch_replay.py)는 자체 44프레임 영상의 우측→좌측 변경과 좌우 점멸을 주입해 저장/읽기/재생/두 클립을 연결합니다. 차량 탐지 모델의 결과나 실제 사건 정답이 아닙니다.
 
+먼저 [목록 명령](scripts/list_events.py)으로 번호·방향·시간·점멸/unknown 사유를 확인하고, 원하는 번호만 선택할 수 있습니다. `--catalog`는 `--candidate-indices`와 함께 사용합니다.
+
+```powershell
+python -m scripts.list_events --input "D:\dashcam\input.mp4" --inputs "D:\recording-001\inputs.json" --output "D:\catalog-001"
+python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\catalog-001\inputs.json" --catalog "D:\catalog-001\catalog.json" --candidate-indices 1 0 --output "D:\selected-review-001"
+```
+
+목록 stdout은 후보 요약이고 원본 경로·해시는 출력하지 않습니다. 해시/출처는 로컬 receipt에 있습니다. 합성 일괄 데모도 목록 저장→읽기→명시 선택→새 재생 대조를 거칩니다. 변경된 목록/입력은 다시 목록을 생성해 검토하고 선택하세요. 자동 필터나 모든 후보 자동 내보내기는 없습니다.
+
 `inputs.json`은 영상만으로 자동 생성되지 않습니다. 호출자가 검증된 `InputFrame` 관측과 명시 설정을 제공해야 하며 재생에 선택 의존성과 FFmpeg가 필요합니다.
 
 자원 진단은 소스 checkout에서 선택 의존성·FFmpeg가 있는 새 Python 프로세스로 매번 실행하세요. 결과는 경량 JSON stdout으로 나오며 생성 영상·클립은 종료 시 정리됩니다. `--seconds` 상한은 합성 생성량 제한이며 제품의 최대 영상 길이가 아닙니다.
@@ -278,6 +295,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 | 검토 MP4 | 선택 프레임 ≤120·원본 축 ≤1024·제한된 time base·무음 coded view·고정 짝수 캔버스 |
 | 입력 재생 | 한 차량·JSON ≤1 MiB·입력/디코딩 구간 ≤120프레임·단일 원본/시간축 |
 | 일괄 내보내기 | 명시 후보 번호 1~120개·직렬 처리·각 후보의 기존 검토 한계·전체 확정 또는 전체 실패 |
+| 후보 목록 | JSON ≤1 MiB·원본/입력 검증·전체 후보 요약·예정 맥락·검토 영상 없음 |
 | 시간축 | 전체 프레임 순차 검사·일반 경로 16바이트/프레임 보관, 영상 길이 상한/일정 RAM 보장 아님 |
 | 결과/복구 | 원본·기존 결과 덮어쓰기 금지·오류/취소 시 소유 임시 자원 정리 |
 
@@ -289,10 +307,11 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 310개 PASS | CLI·추적·검토·사건/단일·일괄 재생·원본/구간 자원·평가기·그림 출처 검사 |
+| 공개 테스트 | 335개 PASS | CLI·추적·검토·사건/단일·일괄 재생·후보 목록·원본/구간 자원·평가기·그림 출처 검사 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
+| 후보 목록→선택 | 두 후보·빈 목록·가림·CFR/VFR/offset/회전·실제 CLI | 영상 없는 목록·정확한 시각/맥락·fresh 목록 대조·drift 거부·단일/일괄 호환·cleanup/retry |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
