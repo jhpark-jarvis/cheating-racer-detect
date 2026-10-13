@@ -435,6 +435,22 @@ def _full_decode(source: Path, toolchain: Toolchain, code: str) -> None:
     ], error_code=code)
 
 
+def _shift_pts(origin: Fraction, time_base: Fraction) -> str:
+    """Subtract integer ticks first, then only a sub-tick fractional origin.
+
+    FFmpeg expressions use doubles. Dividing a large decimal-origin ratio by TB
+    can round an exact tick upwards; truncation then loses a tick on later frames.
+    Keeping the integral cancellation exact preserves the existing tick bound.
+    """
+    ticks = origin/time_base
+    whole = math.floor(ticks)
+    remainder = ticks-whole
+    expression = f'PTS-({whole})'
+    if remainder:
+        expression += f'-({remainder.numerator}/{remainder.denominator})'
+    return expression
+
+
 def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolchain: Toolchain) -> dict:
     """Re-encode a half-open source interval into an unpublished job folder."""
     if not start.is_finite() or not end.is_finite():
@@ -457,8 +473,7 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
     end_tick = math.ceil(absolute_end / timeline.time_base)
     # Retain the requested origin, not STARTPTS, so a late audio start and the
     # first selected video's fractional offset remain on the same clock.
-    origin_expression = f"({absolute_start.numerator}/{absolute_start.denominator})/TB"
-    video_filter = f"trim=start_pts={start_tick}:end_pts={end_tick},setpts=PTS-{origin_expression}"
+    video_filter = f"trim=start_pts={start_tick}:end_pts={end_tick},setpts={_shift_pts(absolute_start, timeline.time_base)}"
     args: list[str | Path] = [
         toolchain.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n", "-xerror", "-err_detect", "explode", "-copyts",
         *_input_options(), "-i", source, "-map", f"0:{video['index']}", "-vf", video_filter,
@@ -472,7 +487,7 @@ def extract(source: Path, destination: Path, start: Decimal, end: Decimal, toolc
         audio_end = math.ceil(absolute_end * sample_rate)
         args.extend([
             "-map", f"0:{audio['index']}", "-af",
-            f"asettb=1/{sample_rate},atrim=start_pts={audio_start}:end_pts={audio_end},asetpts=PTS-{origin_expression}",
+            f"asettb=1/{sample_rate},atrim=start_pts={audio_start}:end_pts={audio_end},asetpts={_shift_pts(absolute_start, Fraction(1, sample_rate))}",
             "-c:a", "aac", "-b:a", "192k", "-ar", str(sample_rate),
         ])
     else:
