@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="405" viewBox="0 0 1200 405" role="img" aria-labelledby="title desc">
+  <title id="title">Misses and unknown remain visible in evaluation</title>
+  <desc id="desc">Fictional four-event example reproduced by scripts/demo_assessment.py, not measured driving performance. Three events match, one is missed. Two matched predictions are known; one is correct. An unknown truth predicted as no blink is separately counted as dangerous certainty. All four eligible truths remain in coverage denominators.</desc>
+  <rect width="1200" height="405" rx="16" fill="#f5f8fa"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#173449">
+    <text x="30" y="40" font-size="24" font-weight="700">EVALUATE EVENTS, SIGNALS AND ABSTENTION SEPARATELY</text>
+    <text x="30" y="67" font-size="15" fill="#526a7a">Fictional example · exact output of demo_assessment · not measured driving performance</text>
+    <g font-size="17" font-weight="700"><text x="30" y="111">Eligible truth</text><text x="270" y="111">g1</text><text x="480" y="111">g2</text><text x="690" y="111">g3</text><text x="900" y="111">g4</text></g>
+    <g fill="#fff" stroke="#b6c9d2" stroke-width="2"><rect x="225" y="129" width="195" height="46" rx="8"/><rect x="435" y="129" width="195" height="46" rx="8"/><rect x="645" y="129" width="195" height="46" rx="8"/><rect x="855" y="129" width="195" height="46" rx="8"/></g>
+    <g font-size="17"><text x="30" y="158">Signal label</text><text x="245" y="158">right blink</text><text x="455" y="158" fill="#b45309">unknown</text><text x="665" y="158">right blink</text><text x="875" y="158">left blink</text></g>
+    <g fill="#e5f5ef" stroke="#00786e" stroke-width="2"><rect x="225" y="214" width="195" height="46" rx="8"/></g>
+    <g fill="#fff1e0" stroke="#b45309" stroke-width="2"><rect x="435" y="214" width="195" height="46" rx="8"/><rect x="645" y="214" width="195" height="46" rx="8"/></g>
+    <rect x="855" y="214" width="195" height="46" rx="8" fill="#edf1f4" stroke="#718897" stroke-width="2" stroke-dasharray="6 4"/>
+    <g stroke="#335b71" stroke-width="2"><path d="M322 178V205"/><path d="M532 178V205"/><path d="M742 178V205"/></g>
+    <g font-size="17"><text x="30" y="243">Prediction</text><text x="245" y="243">right blink</text><text x="455" y="243">no blink observed</text><text x="665" y="243">unknown</text><text x="875" y="243">MISSED EVENT</text></g>
+    <g font-size="14" fill="#526a7a"><text x="245" y="286">Known + correct</text><text x="455" y="286" fill="#b45309">Dangerous certainty: 1</text><text x="665" y="286">Matched, not known</text><text x="875" y="286">Still in denominator</text></g>
+    <rect x="30" y="313" width="1140" height="63" rx="9" fill="#173449"/>
+    <g font-size="17" fill="#fff"><text x="49" y="341">Event recall = 3/4</text><text x="325" y="341">Known coverage = 2/4</text><text x="658" y="341">Correct signal coverage = 1/4</text><text x="49" y="363" font-size="14">All coverage denominators include every eligible truth · confusion matrix uses matched events only · unknown is not off</text></g>
+  </g>
+</svg>

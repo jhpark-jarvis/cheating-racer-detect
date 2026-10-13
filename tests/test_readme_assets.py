@@ -32,7 +32,7 @@ class Figures(unittest.TestCase):
     def test_readme_embeds_all_figures_and_local_links_resolve(self):
         readme = (ROOT/'README.md').read_text(encoding='utf-8')
         images = re.findall(r'!\[[^\]]*\]\((assets/figures/[^)]+)\)', readme)
-        self.assertEqual(len(images), 6)
+        self.assertEqual(len(images), 8)
         for target in re.findall(r'\]\(([^)]+)\)', readme):
             if target.startswith(('http:', 'https:', '#')):
                 continue
@@ -48,7 +48,7 @@ class Figures(unittest.TestCase):
 
     def test_original_vector_diagram_is_safe_and_has_verified_provenance(self):
         ledger = json.loads((ROOT/'assets/figures/provenance.json').read_text(encoding='utf-8'))
-        self.assertEqual(len(ledger['diagrams']), 1)
+        self.assertEqual(len(ledger['diagrams']), 3)
         record = ledger['diagrams'][0]
         self.assertEqual(record['file'], 'input-replay.svg')
         data = (ROOT/'assets/figures'/record['file']).read_bytes()
@@ -65,6 +65,29 @@ class Figures(unittest.TestCase):
             self.assertIn(word, labels)
         for source in record['source']:
             self.assertTrue((ROOT/source).is_file())
+
+    def test_new_diagrams_are_original_safe_and_reproducible(self):
+        ledger = json.loads((ROOT/'assets/figures/provenance.json').read_text(encoding='utf-8'))
+        records = {r['file']: r for r in ledger['diagrams'][1:]}
+        self.assertEqual(set(records), {'assessment-coverage.svg', 'research-context.svg'})
+        for name, record in records.items():
+            data = (ROOT/'assets/figures'/name).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), record['sha256'])
+            self.assertLess(len(data), 20_000)
+            svg = ET.fromstring(data)
+            for item in svg.iter():
+                self.assertNotIn(item.tag.split('}')[-1], ('script', 'image', 'foreignObject', 'a'))
+                self.assertFalse(any(k.startswith('on') or k.endswith('href') for k in item.attrib))
+            for source in record['source']:
+                self.assertTrue((ROOT/source).is_file())
+            labels = ' '.join(svg.itertext())
+            if name == 'assessment-coverage.svg':
+                for text in ('3/4', '2/4', '1/4', 'MISSED EVENT', 'unknown', 'not measured'):
+                    self.assertIn(text, labels)
+            else:
+                self.assertEqual(record['references'], ['https://arxiv.org/abs/2107.08430', 'https://arxiv.org/abs/1905.01333'])
+                for text in ('YOLOX', 'DeepSignals', 'not implemented', 'unknown'):
+                    self.assertIn(text, labels)
 
 
 if __name__ == '__main__':

@@ -24,6 +24,7 @@
 | 분석 API | 같은 프레임의 탐지 계약·가변 dt 추적·관측/예측/모호성 요약·렌더링 |
 | 검토 내보내기 | 무음 coded-view MP4·원본 클립의 음성/회전·프레임별 시각 매핑 |
 | 사건 API | 주입 차선/자차 상태 기반 후보·좌우 ROI 시계열·단일/명시 선택 일괄 검토 클립 |
+| 검증·평가 | 저장 batch 읽기 전용 재검사·이벤트 매칭·신호 confusion/unknown/미탐 포함 coverage |
 | 후속 연구 | 자동 차선·자차 이동·램프 ROI/의미 인식·실영상 교정 |
 
 미검출을 미점등으로 해석하지 않습니다. ID는 임시 추적 식별자이지 신원 정보가 아닙니다. 모델 점수·위치 예측은 위반 확률이나 실제 점멸 관측이 아닙니다.
@@ -211,6 +212,31 @@ replay-batch-001/
 
 `export_replay_batch(..., catalog=load_catalog("catalog.json"))`는 원본·입력 해시를 먼저 확인하고 **새 재생의 전체 목록**을 다시 대조합니다. 순서·시각·신호·후보 내용이 달라지면 영상 생성 전에 `CATALOG_CHANGED`로 중단합니다. 일치하면 canonical 목록과 해시를 검토 묶음에 함께 저장합니다. 해시는 인증·서명이 아니고 목록은 분석 캐시가 아닙니다. 목록과 내보내기는 별도 작업이며 각각 원본을 분석합니다. 기존 단일/목록 없는 일괄 호출은 유지됩니다. [목록 계약 시험](tests/test_candidate_catalog.py), [실제 목록→선택→클립 검증](tests/test_candidate_catalog_native.py)
 
+### 3.12 Read-only saved-bundle verification
+
+[`verify_batch`](cheating_racer_detect/events/verify.py)는 저장 batch의 고정 상대 참조·입력/목록/후보 해시·관측 기록·원본↔파생 PTS를 재검사합니다. 검토 MP4의 저장 byte hash, 실제 프레임·마지막 duration, 원본 클립의 회전/크기·AAC 시각을 확인하고 두 영상을 완전 디코딩합니다. 기존 파일을 수정하지 않아 폴더 이동 후에도 사용할 수 있습니다.
+
+원본 없이 하는 검사는 **저장 자료 간 정합성**입니다. 원본을 지정하면 해시·실제 원본 PTS/픽셀과 새 사건/램프 재생을 추가 대조합니다. 해시는 인증·서명이 아니며 주입 차선/ROI의 사실성은 확인하지 않습니다. 기존 원본 클립에는 byte hash가 없어, 원본 없는 검사로 시각·형식이 유지된 임의 픽셀 변경까지 검출한다고 보장하지 않습니다. 현재 단일 replay/독립 review가 아닌 batch-v1을 지원합니다. [실제 재검사 시험](tests/test_bundle_verify_native.py)
+
+### 3.13 Signal assessment with visible abstention
+
+[`assess`](cheating_racer_detect/events/assessment.py)는 명시적인 GT↔track 대응·시각 허용치로 기존 일대일 매칭을 사용하고, 일치 사건의 신호 confusion matrix를 따로 계산합니다. GT `unknown`을 `no_blink_observed`로 확정한 건수도 분리합니다. 놓친 사건은 recall과 종단 간 coverage의 분모에 남습니다.
+
+```math
+\mathrm{known\ coverage}=\frac{\#\,\text{matched events with known predicted signal}}{\#\,\text{all eligible GT events}},\qquad
+\mathrm{correct\ coverage}=\frac{\#\,\text{matched correct known signals}}{\#\,\text{all eligible GT events}}.
+```
+
+GT 관측 가능 비율·전체 GT 기준 coverage와 **신호가 관측 가능한 GT만 기준으로 한 coverage**를 따로 보고합니다. 두 기준 모두 미탐을 분모에 포함하며 0분모는 `null`입니다. 모든 공급 GT는 평가 대상 차선 변경으로 간주하므로 제외 구간 선정·관측 가능 라벨 교정은 평가자가 명시해야 합니다. 실험 입력 계약이지 최종 GT 스키마·제품 통과 기준이 아닙니다. 사건만 모은 클립에서 시간당 오탐을 추정하지 않습니다.
+
+![미탐과 unknown을 포함하는 평가 예시](assets/figures/assessment-coverage.svg)
+
+*Figure 7. 직접 작성한 가상 4사건 예시. [재현 명령](scripts/demo_assessment.py)의 실제 계산과 일치하지만 주행 측정값은 아닙니다. 미탐과 GT unknown을 숨기지 않습니다.*
+
+### 3.14 Detector observations to replay inputs
+
+[`capture_inputs`](cheating_racer_detect/events/capture.py)는 caller-owned detector bridge와 명시 선택 ID를 원본 디코딩에 연결해 `inputs.json`·모델 출처의 `capture.json`을 새 폴더에 함께 저장합니다. 현재 실제 Vehicle만 보관하고 prediction/ambiguity/없는 ID는 `None`, 다른 ID로 자동 치환하지 않습니다. lane/ROI callback을 제공하지 않으면 해당 조건은 unknown입니다. 실패·취소는 tracker 이력을 폐기하며 새 bridge로 재시도합니다. 자동 차선/램프 모델이나 영상만 입력하는 자동 사건 분석기는 아닙니다. [native 연결 시험](tests/test_capture_native.py)
+
 ## 4. Reproducibility
 
 검증 환경: Windows · Python 3.13.13 · FFmpeg/ffprobe 9.0.2 Gyan essentials. 클립 CLI에는 GPU와 ML 패키지가 필요하지 않습니다.
@@ -279,7 +305,18 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\cata
 
 목록 stdout은 후보 요약이고 원본 경로·해시는 출력하지 않습니다. 해시/출처는 로컬 receipt에 있습니다. 합성 일괄 데모도 목록 저장→읽기→명시 선택→새 재생 대조를 거칩니다. 변경된 목록/입력은 다시 목록을 생성해 검토하고 선택하세요. 자동 필터나 모든 후보 자동 내보내기는 없습니다.
 
-`inputs.json`은 영상만으로 자동 생성되지 않습니다. 호출자가 검증된 `InputFrame` 관측과 명시 설정을 제공해야 하며 재생에 선택 의존성과 FFmpeg가 필요합니다.
+검토 묶음 검사는 새 출력 폴더를 만들지 않습니다. 성공 0, 오류 1, 취소 130을 반환하며 stdout은 경로 없는 요약입니다. 원본을 지정한 모드는 재생에 선택 의존성이 필요합니다.
+
+```powershell
+python -m scripts.verify_bundle --bundle "D:\selected-review-001"
+python -m scripts.verify_bundle --bundle "D:\selected-review-001" --input "D:\dashcam\input.mp4"
+python -m scripts.demo_assessment
+python -m scripts.evaluate_events --labels "D:\evaluation\labels.json"
+```
+
+평가 입력 형식은 [가상 예시의 `definition()`](scripts/demo_assessment.py)을 참고하세요. 사건별 정규화 시각·신호·평가 대상, 명시 차량 대응과 시간 정책을 기록해야 합니다. 평가 명령은 최대 GT/예측 각64개·JSON 1 MiB를 읽고 결과만 stdout에 출력합니다.
+
+`inputs.json`을 생성하려면 호출자가 직접 관측을 제공하거나 detector bridge·설정을 준비해 `capture_inputs`를 사용합니다. 후자의 차선/ROI 조건도 자동 인식되지 않습니다. 재생에는 선택 의존성과 FFmpeg가 필요합니다.
 
 자원 진단은 소스 checkout에서 선택 의존성·FFmpeg가 있는 새 Python 프로세스로 매번 실행하세요. 결과는 경량 JSON stdout으로 나오며 생성 영상·클립은 종료 시 정리됩니다. `--seconds` 상한은 합성 생성량 제한이며 제품의 최대 영상 길이가 아닙니다.
 
@@ -296,6 +333,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\cata
 | 입력 재생 | 한 차량·JSON ≤1 MiB·입력/디코딩 구간 ≤120프레임·단일 원본/시간축 |
 | 일괄 내보내기 | 명시 후보 번호 1~120개·직렬 처리·각 후보의 기존 검토 한계·전체 확정 또는 전체 실패 |
 | 후보 목록 | JSON ≤1 MiB·원본/입력 검증·전체 후보 요약·예정 맥락·검토 영상 없음 |
+| 저장 검사·평가 | batch-v1 읽기 전용·JSON별 ≤1 MiB·평가 GT/예측 각 ≤64·명시 대응/시간 정책 |
 | 시간축 | 전체 프레임 순차 검사·일반 경로 16바이트/프레임 보관, 영상 길이 상한/일정 RAM 보장 아님 |
 | 결과/복구 | 원본·기존 결과 덮어쓰기 금지·오류/취소 시 소유 임시 자원 정리 |
 
@@ -307,11 +345,14 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 335개 PASS | CLI·추적·검토·사건/단일·일괄 재생·후보 목록·원본/구간 자원·평가기·그림 출처 검사 |
+| 공개 테스트 | 360개 PASS | CLI·추적·검토·사건 재생/목록·저장 검사·관측 입력·평가·원본/구간 자원·그림 출처 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
 | 후보 목록→선택 | 두 후보·빈 목록·가림·CFR/VFR/offset/회전·실제 CLI | 영상 없는 목록·정확한 시각/맥락·fresh 목록 대조·drift 거부·단일/일괄 호환·cleanup/retry |
+| 저장 batch 재검사 | 폴더 이동·원본 유/무·목록 유/무·AAC/회전·실제 CLI | readonly·누락/손상/해시/PTS/관측 drift 거부·원본 모드 fresh 후보/램프 대조 |
+| 신호 평가 | 가상 GT/예측·unknown/중복/미탐·실제 CLI | confusion·GT unknown→미점멸 위험·미탐 포함 coverage·0분모 null, 정확도 증거 아님 |
+| 탐지 관측 저장 | scripted detector→native Tracker→24프레임 입력/모델 receipt | 실제 관측만 저장·미관측/없는 ID 치환 없음·unknown gate·실패/취소/정리 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
@@ -320,6 +361,7 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 | 검토 MP4 | CFR/VFR/offset/90·180·270 회전·단일 프레임·음성 | 실제 FFmpeg/OpenCV·독립 ffprobe PTS/마지막 duration·픽셀·원본 불변 대조 |
 | 연결/프레임 preview | 6종 자체 영상 162프레임 + 모호성 사례 | scripted boxes → native tracking/render; 실차 모델 정확도 아님 |
 | 로컬 모델 연결 | YOLOX-s/RTX2070·합성 입력 18프레임 | 차량 검출 0개: empty 연결 경로만 확인, positive 성능 미검증 |
+| 로컬 모델→입력 저장 | 기존 YOLOX-s/RTX2070·추가 합성 6프레임 | 선택 차량 actual 관측0·unknown lane/ROI·입력 roundtrip/원본 불변·임시 정리, 실차 정확도 아님 |
 | 실패/복구 | 입력·기록·native/encode 실패·취소·출력 충돌·재시도 | 원본/기존 결과 보존과 소유 임시 자원 정리 |
 
 FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어집니다. skip이 있는 실행을 전체 검증으로 볼 수 없습니다. 수동 플레이어·사용자 터미널·업무 수락은 아직 남아 있습니다. [그림 출처와 생성 프롬프트](assets/figures/provenance.json)는 유형·해시·원본 구현 revision을 구분합니다.
@@ -355,6 +397,10 @@ FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어�
 입력 주입형 규칙은 자동 차선/자차 이동/램프 ROI·좌우·의미 인식을 대신하지 않습니다. 곡선/합류·가림·반사광·브레이크등·해상도 부족을 실영상으로 교정해야 합니다. 생성/복원 이미지나 위치 예측으로 불빛을 만들어 근거로 사용하지 않습니다. 관련 연구는 설계 참고이며 해당 모델은 아직 구현/채택하지 않았습니다. [Frossard et al., 2019](https://arxiv.org/abs/1905.01333)
 
 실영상의 이벤트 정밀도/재현율·unknown/커버리지·ID 교환·연속 파일과 사용자 검토 효과는 미검증입니다. 합성 benchmark는 처리 시간·자체 프로세스 메모리·표본 임시 용량·반복 읽기를 측정하지만 FFmpeg 자식 RAM/VRAM·장시간 수락을 검증하지 않습니다. 패키지 빌드·fresh install·다른 OS/GPU·최종 모델/가중치 배포도 별도 검증 대상입니다. 자동 신고나 법적 위반 확정을 제공하지 않습니다. 프로젝트 라이선스는 미정입니다.
+
+![YOLOX·DeepSignals와 현재 구현의 관계](assets/figures/research-context.svg)
+
+*Figure 8. 원논문 내용을 참고해 직접 작성한 설명 도식이며 논문 그림 복제가 아닙니다. YOLOX의 decoupled head와 DeepSignals의 시공간 신호 추론을 현재 구현의 경계와 비교합니다. DeepSignals 네트워크는 미구현이며 논문 성능을 이 프로젝트에 적용하지 않습니다. [YOLOX 원논문](https://arxiv.org/abs/2107.08430), [DeepSignals 원논문](https://arxiv.org/abs/1905.01333).*
 
 ## References
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="490" viewBox="0 0 1200 490" role="img" aria-labelledby="title desc">
+  <title id="title">Research context and implementation boundaries</title>
+  <desc id="desc">Original schematic, not a reproduction of paper figures. YOLOX motivates decoupled detection heads. DeepSignals motivates joint spatial and temporal signal reasoning. This project binds current detections to exact source time and uses caller-provided lane and lamp gates. Learned signal semantics remain unimplemented.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#335b71"/></marker></defs>
+  <rect width="1200" height="490" rx="16" fill="#f5f8fa"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#173449">
+    <text x="30" y="39" font-size="24" font-weight="700">RESEARCH CONTEXT ≠ IMPLEMENTATION CLAIM</text>
+    <text x="30" y="64" font-size="15" fill="#526a7a">Original explanatory schematic · linked primary papers · no reproduced figures or benchmark results</text>
+    <g fill="#fff" stroke="#b6c9d2" stroke-width="2"><rect x="30" y="88" width="360" height="347" rx="10"/><rect x="420" y="88" width="360" height="347" rx="10"/><rect x="810" y="88" width="360" height="347" rx="10"/></g>
+    <g font-size="21" font-weight="700"><text x="50" y="121">A  YOLOX (2021)</text><text x="440" y="121">B  DeepSignals (2019)</text><text x="830" y="121">C  This prototype</text></g>
+    <g font-size="15" fill="#526a7a"><text x="50" y="147">Anchor-free / decoupled head</text><text x="440" y="147">Spatial + temporal visual signals</text><text x="830" y="147">Source-time / evidence boundary</text></g>
+    <g stroke="#335b71" stroke-width="2" fill="#edf4f7"><rect x="50" y="179" width="115" height="107" rx="8"/><rect x="240" y="169" width="128" height="37" rx="7"/><rect x="240" y="218" width="128" height="37" rx="7"/><rect x="240" y="267" width="128" height="37" rx="7"/><rect x="440" y="177" width="320" height="43" rx="8"/><rect x="440" y="252" width="320" height="43" rx="8"/><rect x="830" y="177" width="320" height="43" rx="8"/><rect x="830" y="252" width="320" height="43" rx="8"/></g>
+    <g fill="none" stroke="#335b71" stroke-width="2" marker-end="url(#arrow)"><path d="M165 232H199V188H232"/><path d="M199 232H232"/><path d="M199 232V286H232"/><path d="M600 221V244"/><path d="M990 221V244"/></g>
+    <g font-size="17"><text x="68" y="223">Features</text><text x="68" y="247">per frame</text><text x="253" y="193">Class</text><text x="253" y="242">Box</text><text x="253" y="291">Objectness</text><text x="463" y="204">Vehicle appearance sequence</text><text x="463" y="279">Learned temporal reasoning</text><text x="853" y="204">PTS → current detector → ID</text><text x="853" y="279">Caller lane / ROI → history</text></g>
+    <g font-size="16"><text x="50" y="342" fill="#00786e">Local YOLOX-s experiment</text><text x="50" y="369">Not a final detector selection</text><text x="50" y="395">COCO ≠ dashcam accuracy</text><text x="440" y="342" fill="#b45309">Design reference only</text><text x="440" y="369">This network is not implemented</text><text x="440" y="395">Brightness ≠ signal semantics</text><text x="830" y="342" fill="#00786e">Implemented bounded APIs</text><text x="830" y="369">Missing observations → unknown</text><text x="830" y="395">Auto lane / ROI models pending</text></g>
+    <text x="30" y="466" font-size="15" fill="#526a7a">Identity unverified · no paper metric reused · not a violation decision · not real-world accuracy evidence</text>
+  </g>
+</svg>

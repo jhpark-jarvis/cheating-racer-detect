@@ -74,6 +74,23 @@
       "sha256": "a1a16e8825eda7a6979fe3f55feecfe27087287f4bcbaa406eb1131dff81024a",
       "source": ["cheating_racer_detect/events/inputs.py", "cheating_racer_detect/events/replay.py"],
       "scope": "Directly authored vector diagram of implemented source/PTS verification, recorded-input replay and atomic output. Not footage, detection output, performance evidence or a GUI."
+    },
+    {
+      "file": "assessment-coverage.svg",
+      "kind": "original-implementation-diagram",
+      "created": "2026-10-13",
+      "sha256": "a7880463dbec953f3ac2b26b01ecb3f18e7147002767b7ca99fa128f7031b189",
+      "source": ["scripts/demo_assessment.py", "cheating_racer_detect/events/assessment.py"],
+      "scope": "Fictional four-event example, exact reproducible assessment fractions. Not measured driving accuracy. All eligible truths including misses remain in coverage denominators."
+    },
+    {
+      "file": "research-context.svg",
+      "kind": "original-research-schematic",
+      "created": "2026-10-13",
+      "sha256": "f411a9552920466fbbebda5de15c6fc183271e764923205dd3d8e3ea8a0901f8",
+      "source": ["cheating_racer_detect/analysis/contracts.py", "cheating_racer_detect/events/lamp.py"],
+      "references": ["https://arxiv.org/abs/2107.08430", "https://arxiv.org/abs/1905.01333"],
+      "scope": "Directly authored conceptual research comparison, not copied or traced from paper figures. Simplified decoupled detection and spatial/temporal signal context; no architecture equivalence, paper metrics or final model adoption claim."
     }
   ],
   "notes": [
