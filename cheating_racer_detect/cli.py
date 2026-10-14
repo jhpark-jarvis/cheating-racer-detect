@@ -37,10 +37,15 @@ def main(argv: list[str] | None = None) -> int:
     clip_parser.add_argument('--end', required=True, help='포함하지 않을 끝 시각(초)')
     clip_parser.add_argument('--output', required=True, help='아직 존재하지 않는 결과 디렉터리')
     clip_parser.add_argument('--ffmpeg-dir', type=Path)
+    from .events.cli import register
+    register(commands)
     try:
         args = parser.parse_args(argv)
         if args.command == 'doctor':
             result = doctor(discover_tools(args.ffmpeg_dir))
+        elif args.command == 'events':
+            from .events.cli import run
+            result = run(args)
         else:
             try:
                 start, end = Decimal(args.start), Decimal(args.end)
