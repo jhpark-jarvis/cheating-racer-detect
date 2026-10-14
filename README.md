@@ -60,6 +60,25 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. adapter는 미구현이며 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
+### 2.2 Lamp ROI and signal candidates
+
+램프 **부분 위치 → 차량 기준 좌우·방향지시등 의미·가시성 → 원본 시각의 점멸**을 분리합니다. 아래에는 실제 연구 모델과 개발 접근이 함께 있으며 모두 자동 ROI 구현/실차 평가 전입니다.
+
+| 후보 접근 | 역할·장점 | 채택 전 확인할 한계 |
+| --- | --- | --- |
+| 수동 ROI / vehicle-relative crop | 비학습 대조 기준; 원본 영역·좌표·밝기 비교 | 고정 crop은 차종/자세·turn/brake 의미를 보장하지 않음. 자동 모델 아님 |
+| 차량 crop 기반 supervised 부분 head | 좌우 turn 영역 box/center+extent와 visibility/semantic 출력의 개발 후보 | 전용 라벨·꺼진 램프/브레이크/반사/가림 사례 필요. COCO YOLOX-s에 이 기능이 있는 것이 아님; task checkpoint 미확보 |
+| [LISA context-based corner CNN](https://arxiv.org/abs/2307.14571v2) | vehicle box와 **이미 찾은 lamp center**에서 4개 corner 회귀; 위치 보정 참고 | 중심 검출·turn 의미는 별도. 확인한 [원저자 페이지](https://cvrr.ucsd.edu/vehicle-lights-dataset/)만으로 실행 가능한 코드/가중치·Windows 조건은 확정 못 함 |
+| [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) + [SAM 2.1](https://github.com/facebookresearch/sam2) | text→box·prompt→mask; 라벨 초안 보조 후보 | 범용 checkpoint이지 램프 전용 모델이 아님. 작은/꺼진 램프·좌우·신호 의미 미보장; CUDA·언어모델 자산·SAM의 WSL 권고 검토 필요 |
+
+주 자동 ROI 경로는 **수동 확인 기준 → 차량 crop 기반 전용 부분 head**를 제안합니다. LISA는 위치 표현·가시성 설계 참고, 범용 모델 조합은 라벨 보조입니다. [DeepSignals](https://arxiv.org/abs/1905.01333)의 공간·시간 신호 추론과 [TLD](https://arxiv.org/abs/2409.02508)의 차량 crop·brake/turn 분류·시간 후처리는 **램프 부분 box 검출과 다른 역할**입니다. TLD의 2Hz 라벨이나 프레임 순서를 원본 PTS·완전 점멸 이력으로 대체하지 않습니다. 어떤 연구의 점수/시간 임계치도 이 프로젝트의 채택 기준이 아닙니다.
+
+연결안은 `현재 실제 Vehicle → crop 좌표 역변환 → 좌우/의미/가시성 검증 → LampROI → 원본 BGR·PTS → LampEngine`입니다. 현재 엔진은 box를 소비하므로 mask/corner→box의 배경 혼입도 평가해야 합니다. 미검출·범용 mask·추적 전파만으로 `usable`이나 `no_blink_observed`를 만들지 않으며, 구별할 근거가 없으면 `model_uncertain`/`unknown`으로 남깁니다. 학습된 신호 class를 밝기 값으로 바꿔 주입하지 않습니다. [램프 계약](cheating_racer_detect/events/lamp.py)
+
+GroundingDINO [코드](https://raw.githubusercontent.com/IDEA-Research/GroundingDINO/main/LICENSE)는 Apache-2.0이며 정확한 가중치·언어/backbone 자산 조건은 별도 확인 대상입니다. SAM 2는 [공식 안내](https://github.com/facebookresearch/sam2#license)에서 checkpoint의 Apache-2.0 적용을 명시하지만 데이터·전이 파일 조건은 구분해야 합니다. LISA/DeepSignals/TLD의 선택 코드·checkpoint·원본 데이터 권리는 확인되지 않은 부분이 남습니다. 다운로드·설치·추론은 이번 비교에서 수행하지 않았습니다.
+
+평가는 같은 세션 분리 자료에서 detector/tracker를 고정하고 lane 또는 ROI 하나씩 바꿉니다. 위치/좌우/가시성의 분리 평가와 사건·신호 종단 간 평가를 구분하고, 미탐 포함 recall·unknown/coverage·위험한 미점멸 확정·원본 읽기/모델 로드를 포함한 시간·RAM/VRAM을 함께 비교할 계획입니다. 실영상·정량 기준·모델별 Windows/회전 의미 검증과 최종 선택은 아직 남아 있습니다.
+
 ## 3. Method
 
 ### 3.1 Source time and coordinates
@@ -452,3 +471,6 @@ FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어�
 5. Qin, Z., Zhang, P., & Li, X. (2022). [Ultra Fast Deep Lane Detection with Hybrid Anchor Driven Ordinal Classification](https://arxiv.org/abs/2206.07389). 차선 anchor 표현 후보.
 6. Zheng, T. et al. (2022). [CLRNet: Cross Layer Refinement Network for Lane Detection](https://arxiv.org/abs/2203.10350). 차선 위치 정밀화 후보.
 7. Honda, H., & Uchida, Y. (2024). [CLRerNet: Improving Confidence of Lane Detection with LaneIoU](https://arxiv.org/abs/2305.08366). WACV 2024, arXiv 원고 2023. lane confidence 연구 후보.
+8. Gopalkrishnan, A., Greer, R., Keskar, M., & Trivedi, M. (2023). [Robust Detection, Association, and Localization of Vehicle Lights](https://arxiv.org/abs/2307.14571v2). 램프 center 기반 corner 회귀 참고.
+9. Greer, R. et al. (2023). [Patterns of Vehicle Lights](https://arxiv.org/abs/2307.14521). box/center/corner/mask 표현·관측 가능성 설계 참고.
+10. Chai, J., Mu, S., & Xu, S. (2024). [TLD: A Vehicle Tail Light signal Dataset and Benchmark](https://arxiv.org/abs/2409.02508). 부분 ROI 모델과 구분하는 차량 신호 분류 참고.
