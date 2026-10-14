@@ -20,7 +20,7 @@
 
 | 구분 | 현재 범위 |
 | --- | --- |
-| CLI | `doctor`, 원본 `[start,end)` 구간의 검토 클립 추출 |
+| CLI | `doctor`, 구간 `clip`, `events list/replay/verify/evaluate` |
 | 분석 API | 같은 프레임의 탐지 계약·가변 dt 추적·관측/예측/모호성 요약·렌더링 |
 | 검토 내보내기 | 무음 coded-view MP4·원본 클립의 음성/회전·프레임별 시각 매핑 |
 | 사건 API | 주입 차선/자차 상태 기반 후보·좌우 ROI 시계열·단일/명시 선택 일괄 검토 클립 |
@@ -251,6 +251,32 @@ pwsh -NoProfile -File scripts/bootstrap.ps1 -DownloadTools
 
 경로를 자신의 파일로 바꾸세요. 출력 상위 폴더는 존재해야 하고 결과 폴더는 새 이름이어야 합니다. [설치 스크립트](scripts/bootstrap.ps1)는 다운로드한 FFmpeg의 고정 SHA-256을 검사하고 전역 PATH·드라이버를 변경하지 않습니다. 기존 도구에는 `--ffmpeg-dir` 또는 `CRD_FFMPEG_DIR`를 지정할 수 있습니다.
 
+### Installed CLI
+
+Python 3.13의 별도 환경에서 소스를 설치하면 소스 폴더 밖에서도 `crd`를 사용할 수 있습니다. FFmpeg는 별도로 준비하며 패키지에 포함되지 않습니다.
+
+```powershell
+python -m pip install .
+crd doctor --ffmpeg-dir "D:\tools\ffmpeg\bin"
+crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-001" --ffmpeg-dir "D:\tools\ffmpeg\bin"
+crd events verify --bundle "D:\review-batch" --input "D:\dashcam\input.mp4" --ffmpeg-dir "D:\tools\ffmpeg\bin"
+crd events evaluate --labels "D:\evaluation\labels.json"
+```
+
+목록·검증·평가는 기본 패키지에서 동작합니다. 검토 영상 생성에는 `python -m pip install ".[tracking]"`으로 NumPy/OpenCV를 준비하세요.
+
+```powershell
+crd events replay --input "D:\dashcam\input.mp4" --inputs "D:\catalog-001\inputs.json" --catalog "D:\catalog-001\catalog.json" --candidate-indices 1 0 --output "D:\review-batch" --ffmpeg-dir "D:\tools\ffmpeg\bin"
+```
+
+단일 선택은 `--candidate-index 0`, 일괄 선택은 `--candidate-indices`를 사용합니다. 자동 모델 탐지 명령이 아니라 **기록된 관측 입력**을 처리하는 실험 접점입니다. 설치형 명령은 성공 `0`·JSON stdout, 오류 `2`·JSON stderr, 취소 `130`을 반환합니다. 기존 `scripts.*` 명령은 호환용으로 유지하며 오류 `1`·JSON stdout 계약이 그대로입니다. [명령 계약 시험](tests/test_installed_cli.py), [실제 비편집 설치 시험](tests/test_install_native.py)
+
+wheel은 Python 모듈과 패키지 메타데이터만 담습니다. [설치 검증 도구](scripts/check_install.py)는 sdist→wheel 재빌드·파일/RECORD 대조·새 환경 설치·외부 작업 폴더의 `crd.exe`를 검사합니다. 검증용 호스트에는 기존 setuptools≥77·uv·FFmpeg·NumPy/OpenCV가 필요하며, 아래 경로는 자신의 도구로 바꾸세요. 선택 캐시 설치도 offline으로만 수행하고 결과·환경은 종료 시 정리합니다. [pip 설치 문서](https://pip.pypa.io/en/stable/cli/pip_install/), [Setuptools 빌드 인터페이스](https://setuptools.pypa.io/en/latest/build_meta.html)
+
+```powershell
+python -m scripts.check_install --uv "D:\tools\uv.exe" --build-python "D:\analysis-env\Scripts\python.exe" --ffmpeg-dir "D:\tools\ffmpeg\bin" --tracking-cache "D:\uv-cache"
+```
+
 ### Analysis API and synthetic demo
 
 NumPy/OpenCV는 선택 의존성입니다. 별도 환경에서 `python -m pip install ".[tracking]"`으로 준비할 수 있으며 기본 CLI·순수 계약/summary에는 필요하지 않습니다. 아래 탐지기와 정책은 호출자가 준비합니다. 모델 자동 로딩·다운로드·자동 영상 분석 명령은 제공하지 않습니다.
@@ -305,7 +331,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\cata
 
 목록 stdout은 후보 요약이고 원본 경로·해시는 출력하지 않습니다. 해시/출처는 로컬 receipt에 있습니다. 합성 일괄 데모도 목록 저장→읽기→명시 선택→새 재생 대조를 거칩니다. 변경된 목록/입력은 다시 목록을 생성해 검토하고 선택하세요. 자동 필터나 모든 후보 자동 내보내기는 없습니다.
 
-검토 묶음 검사는 새 출력 폴더를 만들지 않습니다. 성공 0, 오류 1, 취소 130을 반환하며 stdout은 경로 없는 요약입니다. 원본을 지정한 모드는 재생에 선택 의존성이 필요합니다.
+아래 소스 명령의 검토 묶음 검사는 새 출력 폴더를 만들지 않습니다. 성공 0, 오류 1, 취소 130을 반환하며 stdout은 경로 없는 요약입니다. 원본 재생 대조에도 NumPy/OpenCV는 필요하지 않고 FFmpeg가 필요합니다.
 
 ```powershell
 python -m scripts.verify_bundle --bundle "D:\selected-review-001"
@@ -345,7 +371,7 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 360개 PASS | CLI·추적·검토·사건 재생/목록·저장 검사·관측 입력·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 379개 PASS | CLI·설치/패키지 구성·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
@@ -353,6 +379,7 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 | 저장 batch 재검사 | 폴더 이동·원본 유/무·목록 유/무·AAC/회전·실제 CLI | readonly·누락/손상/해시/PTS/관측 drift 거부·원본 모드 fresh 후보/램프 대조 |
 | 신호 평가 | 가상 GT/예측·unknown/중복/미탐·실제 CLI | confusion·GT unknown→미점멸 위험·미탐 포함 coverage·0분모 null, 정확도 증거 아님 |
 | 탐지 관측 저장 | scripted detector→native Tracker→24프레임 입력/모델 receipt | 실제 관측만 저장·미관측/없는 ID 치환 없음·unknown gate·실패/취소/정리 |
+| 설치형 명령 | setuptools 84·실제 wheel/sdist 재빌드·clean venv·외부 cwd | 비편집 설치/crd.exe·기본 ML 의존성0·목록/검증/평가·캐시만으로 optional 설치/명시 두후보 재생·원본/기존결과 불변 |
 | 원본 검사 재사용 | 같은 합성 원본에서 재사용 off/on 비교 | 원본 metadata/timeline 각각 4→1회·후보/램프/프레임 근거 동일·hash/full decode/파생 검증 유지 |
 | 자원 확장 | 최대600초 자체 원본, head/tail·재사용 off/on | 분석24/검토14 프레임·actual PTS·원본 불변 유지, 계측 스캔/폴더 확정 직렬화 |
 | 순차 시간축 | 8종 영상의 전체 프레임·AAC를 독립 JSON 결과와 대조 | CFR/VFR/offset/회전/지연 음성의 PTS·duration·샘플 interval exact 일치, actual probe 취소/회수/클립 재시도 |
@@ -396,7 +423,7 @@ FFmpeg 또는 NumPy/OpenCV가 없으면 실제 엔진 테스트가 건너뛰어�
 
 입력 주입형 규칙은 자동 차선/자차 이동/램프 ROI·좌우·의미 인식을 대신하지 않습니다. 곡선/합류·가림·반사광·브레이크등·해상도 부족을 실영상으로 교정해야 합니다. 생성/복원 이미지나 위치 예측으로 불빛을 만들어 근거로 사용하지 않습니다. 관련 연구는 설계 참고이며 해당 모델은 아직 구현/채택하지 않았습니다. [Frossard et al., 2019](https://arxiv.org/abs/1905.01333)
 
-실영상의 이벤트 정밀도/재현율·unknown/커버리지·ID 교환·연속 파일과 사용자 검토 효과는 미검증입니다. 합성 benchmark는 처리 시간·자체 프로세스 메모리·표본 임시 용량·반복 읽기를 측정하지만 FFmpeg 자식 RAM/VRAM·장시간 수락을 검증하지 않습니다. 패키지 빌드·fresh install·다른 OS/GPU·최종 모델/가중치 배포도 별도 검증 대상입니다. 자동 신고나 법적 위반 확정을 제공하지 않습니다. 프로젝트 라이선스는 미정입니다.
+실영상의 이벤트 정밀도/재현율·unknown/커버리지·ID 교환·연속 파일과 사용자 검토 효과는 미검증입니다. 합성 benchmark는 처리 시간·자체 프로세스 메모리·표본 임시 용량·반복 읽기를 측정하지만 FFmpeg 자식 RAM/VRAM·장시간 수락을 검증하지 않습니다. 패키지 빌드·clean 설치는 위 Windows/Python3.13 환경에서 검증했으며 다른 OS/GPU·공개 패키지 배포·최종 모델/가중치 배포는 별도 대상입니다. 자동 신고나 법적 위반 확정을 제공하지 않습니다. 프로젝트 라이선스는 미정입니다.
 
 ![YOLOX·DeepSignals와 현재 구현의 관계](assets/figures/research-context.svg)
 
