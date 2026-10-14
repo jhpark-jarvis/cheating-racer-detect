@@ -1,0 +1,13 @@
+include pyproject.toml README.md MANIFEST.in
+recursive-include cheating_racer_detect *.py
+prune tests
+prune scripts
+prune assets
+prune docs
+prune .tools
+prune .venv
+prune .artifacts
+prune .local-backup
+prune .local-work
+exclude AGENTS.md
+global-exclude *.py[cod] *.mp4 *.mov *.mkv *.wav *.mp3 *.pt *.pth *.onnx *.exe *.dll *.whl *.zip *.bundle

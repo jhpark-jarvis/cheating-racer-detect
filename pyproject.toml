@@ -15,5 +15,8 @@ tracking = ["numpy==2.2.6", "opencv-python==4.11.0.86"]
 [project.scripts]
 crd = "cheating_racer_detect.cli:main"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["cheating_racer_detect*"]
