@@ -48,15 +48,27 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 ### 2.1 Automatic lane candidates
 
-차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 비교 기준은 2026-10-14 원저자 문서입니다. 아래 모델은 **모두 미채택이며 이 PC 실행·실영상 성능은 미검증**입니다.
+차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 후보 비교는 2026-10-14, UFLDv2 설치 사전 점검은 2026-10-18 원저자 자료 기준입니다. 아래 모델은 **모두 미채택이며 이 PC 실행·실영상 성능은 미검증**입니다.
 
 | 후보 | 방식·비교 목적 | 실행·연결 조건 |
 | --- | --- | --- |
-| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 첫 추론 경로 점검 후보 | 원본 crop/anchor 좌표 복원·인접 경계 coverage 확인. 공식 demo의 DALI import·빌드 의존성 분리 필요 |
+| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 추론 분리 설계 후보 | 사전 점검 완료·원본 그대로 설치 준비 안 됨. model/aux import의 DALI 의존성·backbone 자동 다운로드·강제 CUDA 분리 필요 |
 | [CLRNet · ResNet-18](https://github.com/Turoad/CLRNet) | cross-layer refinement; 같은 입력에서 위치 정밀화 대안 | 공식 시험은 Ubuntu·Python3.8/Torch1.6/CUDA10.2. CUDA NMS와 현재 Windows 환경의 호환성 미확인 |
 | [CLRerNet · DLA-34](https://github.com/hirotomusiker/CLRerNet) | LaneIoU 기반 assignment/loss; 위치와 confidence 관계 비교 | mmdetection3.3·별도 CUDA NMS·Docker 권고. 점수가 차선 안정성이나 위반 확률은 아님 |
 
 검토 순서 제안은 **UFLDv2 추론 의존성 점검 → CLRNet → CLRerNet**입니다. Windows 지원·속도/정확도 순위가 아닙니다. 코드 표기는 각각 [MIT](https://raw.githubusercontent.com/cfzd/Ultra-Fast-Lane-Detection-v2/master/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/Turoad/CLRNet/main/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/hirotomusiker/CLRerNet/main/LICENSE)이며, CLRNet의 [설치 metadata](https://raw.githubusercontent.com/Turoad/CLRNet/main/setup.py)는 MIT classifier로 불일치합니다. 가중치·학습 데이터 조건은 코드와 별도로 확인해야 합니다. 특히 [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 데이터/파생물의 비상업 용도와 재배포 조건을 구분합니다. 프로젝트 라이선스나 배포 모델을 이 표로 확정하지 않습니다.
+
+#### UFLDv2 installation preflight
+
+점검 소스는 원저자 revision [`c903880`](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/tree/c903880678454dfd9b55a63022368db05c00bc6d)입니다. 정적 소스 확인 결과이며 모델 설치·가중치 다운로드·로드/추론을 수행한 결과가 아닙니다.
+
+| 항목 | 확인 결과·실행 전 조건 |
+| --- | --- |
+| 의존성 | [model](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/model/model_culane.py)과 aux module 모두 `utils.common → data.dali_data → DALI/my_interp`로 연결됩니다. demo만 우회해서는 분리되지 않습니다. [DALI 공식 지원](https://docs.nvidia.com/deeplearning/dali/user-guide/docs/support_matrix.html)은 Linux 플랫폼이며 native Windows 준비 증거가 아닙니다. |
+| 생성·로딩 | 기본 factory는 `pretrained=True`·CUDA를 사용합니다. 분리안에는 backbone 다운로드 비활성화·명시 device·승인된 로컬 full checkpoint의 `weights_only=True`/CPU 로드·키/shape 대조·strict 로딩이 필요합니다. [backbone 소스](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/model/backbone.py), [PyTorch 로딩 문서](https://docs.pytorch.org/docs/2.8/generated/torch.load.html) |
+| 환경·권리 | 기존 Torch/TorchVision 환경의 존재가 UFLDv2 호환성 증거는 아닙니다. wheel의 CUDA runtime과 extension용 toolkit/compiler는 별도입니다. [공식 model zoo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/README.md)의 CULane ResNet18을 식별했지만 실제 파일 해시·적용 권리·학습 원자료 조건은 미확정입니다. |
+
+다음 실험 후보는 **학습 utility를 제거한 ResNet-18 단독 추론 경로**입니다. 아직 구현하지 않았으며, 정확한 가중치 조건 확인·격리 변경·오프라인/합성 검증 뒤에 실제 평가로 진행합니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
 
 연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. adapter는 미구현이며 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
