@@ -102,6 +102,14 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         imported = child([python, '-I', '-c', 'import cheating_racer_detect as c,importlib.util as u,json; '
                           'print(json.dumps({"path":c.__file__,"version":c.__version__,"native":any(u.find_spec(n) for n in ("numpy","cv2","torch"))}))'], external, parsed=True)
         require(Path(imported['path']).is_relative_to(clean) and imported['native'] is False)
+        lane_contract = child([python, '-I', '-c',
+            'from cheating_racer_detect.analysis import LaneBatch,LaneSlot; '
+            'from cheating_racer_detect.tracking import Frame; from fractions import Fraction; '
+            'import json; f=Frame("fixture",0,0,500,Fraction(1,10),500,96,64); '
+            's=tuple(LaneSlot(i,a,(False,)*n,(None,)*n) for i,a,n in '
+            '((1,"row",72),(2,"row",72),(0,"column",81),(3,"column",81))); '
+            'print(json.dumps(LaneBatch(f,"fixture",0,s).report()))'], external, parsed=True)
+        require(lane_contract['frame']['pts'] == 500 and len(lane_contract['slots']) == 4)
         require(child([executable, '--version'], external).strip() == imported['version'])
         for action in ('list', 'replay', 'verify', 'evaluate'):
             child([executable, 'events', action, '--help'], external)
@@ -148,11 +156,24 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
             exists = child(replay_args, external, expected=2, parsed=True)
             require(exists['code'] == 'OUTPUT_EXISTS' and (fixture/'batch/batch.json').read_bytes() == before)
             require((fixture/'batch/catalog.json').read_bytes() == (fixture/'listed/catalog.json').read_bytes())
-            optional = {'status': 'PASS', 'selected_order': [1, 0], 'catalog_checked': True, 'existing_preserved': True}
+            lane_decoded = child([python, '-I', '-c',
+                'import numpy as n,json; from fractions import Fraction; '
+                'from cheating_racer_detect.tracking import Frame; '
+                'from cheating_racer_detect.analysis import UFLDOutput,decode_ufld; '
+                'f=Frame("fixture",0,0,500,Fraction(1,10),500,96,64); '
+                'p={k:n.zeros(s,dtype=n.float32) for k,s in '
+                '{"loc_row":(1,200,72,4),"loc_col":(1,100,81,4),'
+                '"exist_row":(1,2,72,4),"exist_col":(1,2,81,4)}.items()}; '
+                'print(json.dumps(decode_ufld(f,UFLDOutput(f,"fixture",0,p)).report()))'], external, parsed=True)
+            require(lane_decoded['frame']['pts'] == 500 and
+                    all(not slot['support_passed'] for slot in lane_decoded['slots']))
+            optional = {'status': 'PASS', 'selected_order': [1, 0], 'catalog_checked': True,
+                        'existing_preserved': True, 'lane_decode': True}
         require(_sha256(source) == original_hash and sources(ROOT) == source_bytes)
         result = {'status': 'PASS', 'wheel': wheel_audit, 'sdist': sdist_audit,
                   'sdist_rebuild': True, 'noneditable_external_cwd': True, 'base_ml_packages': False,
                   'base_list_candidates': 2, 'base_verify_source': True, 'dependency_error': missing['code'],
+                  'base_lane_contract': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 
