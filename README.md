@@ -48,11 +48,11 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 ### 2.1 Automatic lane candidates
 
-차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 후보 비교는 2026-10-14, UFLDv2 설치 사전 점검은 2026-10-18 원저자 자료 기준입니다. 아래 모델은 **모두 미채택이며 이 PC 실행·실영상 성능은 미검증**입니다.
+차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 후보 비교는 2026-10-14, UFLDv2 설치 사전 점검은 2026-10-18 원저자 자료 기준입니다. 아래 모델은 **모두 미채택이며 학습 가중치의 이 PC 실행·실영상 성능은 미검증**입니다.
 
 | 후보 | 방식·비교 목적 | 실행·연결 조건 |
 | --- | --- | --- |
-| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 추론 분리 설계 후보 | 사전 점검 완료·원본 그대로 설치 준비 안 됨. model/aux import의 DALI 의존성·backbone 자동 다운로드·강제 CUDA 분리 필요 |
+| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 최소 추론 구조 실험 | 난수 CPU/GPU 구조 검증·좌표 후처리 API 구현. 학습 checkpoint의 조건/로딩·실차 성능 미검증, 원본 DALI 경로 자동 설치 미지원 |
 | [CLRNet · ResNet-18](https://github.com/Turoad/CLRNet) | cross-layer refinement; 같은 입력에서 위치 정밀화 대안 | 공식 시험은 Ubuntu·Python3.8/Torch1.6/CUDA10.2. CUDA NMS와 현재 Windows 환경의 호환성 미확인 |
 | [CLRerNet · DLA-34](https://github.com/hirotomusiker/CLRerNet) | LaneIoU 기반 assignment/loss; 위치와 confidence 관계 비교 | mmdetection3.3·별도 CUDA NMS·Docker 권고. 점수가 차선 안정성이나 위반 확률은 아님 |
 
@@ -68,13 +68,29 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 | 생성·로딩 | 기본 factory는 `pretrained=True`·CUDA를 사용합니다. 분리안에는 backbone 다운로드 비활성화·명시 device·승인된 로컬 full checkpoint의 `weights_only=True`/CPU 로드·키/shape 대조·strict 로딩이 필요합니다. [backbone 소스](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/model/backbone.py), [PyTorch 로딩 문서](https://docs.pytorch.org/docs/2.8/generated/torch.load.html) |
 | 환경·권리 | 기존 Torch/TorchVision 환경의 존재가 UFLDv2 호환성 증거는 아닙니다. wheel의 CUDA runtime과 extension용 toolkit/compiler는 별도입니다. [공식 model zoo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/README.md)의 CULane ResNet18을 식별했지만 실제 파일 해시·적용 권리·학습 원자료 조건은 미확정입니다. |
 
-다음 실험 후보는 **학습 utility를 제거한 ResNet-18 단독 추론 경로**입니다. 아직 구현하지 않았으며, 정확한 가중치 조건 확인·격리 변경·오프라인/합성 검증 뒤에 실제 평가로 진행합니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
+**학습 utility를 제거한 ResNet-18 구조**는 난수 가중치로 CPU/GPU 합성 forward를 확인했습니다. 학습 가중치를 적용한 탐지 결과가 아니며 정확한 checkpoint 조건·실제 로딩과 실차 평가는 남아 있습니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
 
-연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. adapter는 미구현이며 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
+연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 아래 decoder는 좌표 복원까지만 지원하며 `LaneSection` 연결 adapter는 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
 UFLDv2의 [고정 config](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/configs/culane_res18.py)는 입력 1600×320·crop ratio 0.6·4 lane slots를 사용합니다. [demo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/demo.py)와 [dataset](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/data/dataset.py)은 RGB resize 1600×533 뒤 아래 320행 crop을 구성합니다. decoder가 공급한 원본 W/H로 이미 복원한 점에는 crop/scale 역변환을 다시 적용하지 않습니다. row/column 표현·유효 slot을 보존해야 하며, 빠진 차선을 생략한 반환 list index를 물리 경계 ID로 쓰지 않습니다.
 
-고정 dataset 크기·30fps writer 대신 현재 원본 `Frame`·PTS를 유지하고, 필요한 회전 역변환과 가시 경계 구간을 검증할 계획입니다. 모델용 확대 입력은 원본 픽셀 증거나 현재 분석 축≤1024 지원 한계를 늘리지 않습니다. 좌표·RGB/crop·slot 소실·가림/자차 이동 검증과 실제 모델 smoke는 아직 수행하지 않았습니다.
+고정 dataset 크기·30fps writer 대신 현재 원본 `Frame`·PTS를 유지합니다. 모델용 확대 입력은 원본 픽셀 증거나 현재 분석 축≤1024 지원 한계를 늘리지 않습니다. RGB/crop·slot 소실·좌표 회전은 합성 검증 대상이며, 실차 가림/자차 이동과 학습 가중치 평가는 미검증입니다.
+
+#### Frame-bound lane decoding
+
+[`decode_ufld`](cheating_racer_detect/analysis/lanes.py)는 **추론이 아닌 출력 후처리**입니다. 고정 CULane/ResNet-18 batch1의 CPU NumPy float32/64 logits 네 개를 받아 정확한 동일 `Frame`을 확인하고, row slots 1/2와 column slots 0/3·raw existence mask를 유지한 immutable 결과를 반환합니다. 기본 패키지 import에는 ML 의존성이 없고 계산할 때만 NumPy가 필요합니다.
+
+```python
+from cheating_racer_detect.analysis import UFLDOutput, decode_ufld
+
+# frame / cpu_numpy_logits는 호출자가 같은 프레임에서 제공해야 합니다.
+output = UFLDOutput(frame, "caller-model-v1", rotation_cw=0, logits=cpu_numpy_logits)
+lanes = decode_ufld(frame, output)
+```
+
+local-width 1의 ordinal expectation을 원본 view 비율로 복원하고, **실제 전처리에서 적용한 clockwise 회전**만 1회 역변환합니다. `rotation_cw=0`은 coded 입력이며 source display rotation을 자동 적용하지 않습니다. demo의 정수 truncation 대신 연속 좌표를 보존하며, grid 끝의 범위 초과·존재하지 않는 anchor는 clamp/외삽하지 않고 `None`으로 남깁니다. 슬롯이 사라져도 네 슬롯의 번호·mask·sample 위치는 유지됩니다.
+
+anchor-count support는 포맷 조건이지 실제 가시성·신뢰도·물리 경계 ID가 아닙니다. 이 API는 `LaneSection`이나 변경 사건을 만들지 않으며 차량 하단 y 단면·안정 ID·ego/scene/후면 자세 검증은 별도입니다. [숫자·회전·누락·실패 시험](tests/test_lane_decoder.py), [실제 합성 CFR/VFR/offset/회전 PTS 연결 시험](tests/test_lane_decoder_native.py)
 
 ### 2.2 Lamp ROI and signal candidates
 
@@ -420,7 +436,8 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 379개 PASS | CLI·설치/패키지 구성·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 403개 PASS | CLI·설치/패키지 구성·차선 좌표/시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
