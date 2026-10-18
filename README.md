@@ -56,7 +56,7 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 | [CLRNet · ResNet-18](https://github.com/Turoad/CLRNet) | cross-layer refinement; 같은 입력에서 위치 정밀화 대안 | 공식 시험은 Ubuntu·Python3.8/Torch1.6/CUDA10.2. CUDA NMS와 현재 Windows 환경의 호환성 미확인 |
 | [CLRerNet · DLA-34](https://github.com/hirotomusiker/CLRerNet) | LaneIoU 기반 assignment/loss; 위치와 confidence 관계 비교 | mmdetection3.3·별도 CUDA NMS·Docker 권고. 점수가 차선 안정성이나 위반 확률은 아님 |
 
-검토 순서 제안은 **UFLDv2 추론 의존성 점검 → CLRNet → CLRerNet**입니다. Windows 지원·속도/정확도 순위가 아닙니다. 코드 표기는 각각 [MIT](https://raw.githubusercontent.com/cfzd/Ultra-Fast-Lane-Detection-v2/master/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/Turoad/CLRNet/main/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/hirotomusiker/CLRerNet/main/LICENSE)이며, CLRNet의 [설치 metadata](https://raw.githubusercontent.com/Turoad/CLRNet/main/setup.py)는 MIT classifier로 불일치합니다. 가중치·학습 데이터 조건은 코드와 별도로 확인해야 합니다. 특히 [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 데이터/파생물의 비상업 용도와 재배포 조건을 구분합니다. 프로젝트 라이선스나 배포 모델을 이 표로 확정하지 않습니다.
+후속 제안은 **UFLDv2의 격리 추론 분리**, 대안은 CLRNet·CLRerNet입니다. Windows 지원·속도/정확도 순위가 아닙니다. 코드 표기는 각각 [MIT](https://raw.githubusercontent.com/cfzd/Ultra-Fast-Lane-Detection-v2/master/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/Turoad/CLRNet/main/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/hirotomusiker/CLRerNet/main/LICENSE)이며, CLRNet의 [설치 metadata](https://raw.githubusercontent.com/Turoad/CLRNet/main/setup.py)는 MIT classifier로 불일치합니다. 가중치·학습 데이터 조건은 코드와 별도로 확인해야 합니다. 특히 [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 데이터/파생물의 비상업 용도와 재배포 조건을 구분합니다. 프로젝트 라이선스나 배포 모델을 이 표로 확정하지 않습니다.
 
 #### UFLDv2 installation preflight
 
@@ -71,6 +71,10 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 다음 실험 후보는 **학습 utility를 제거한 ResNet-18 단독 추론 경로**입니다. 아직 구현하지 않았으며, 정확한 가중치 조건 확인·격리 변경·오프라인/합성 검증 뒤에 실제 평가로 진행합니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
 
 연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. adapter는 미구현이며 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
+
+UFLDv2의 [고정 config](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/configs/culane_res18.py)는 입력 1600×320·crop ratio 0.6·4 lane slots를 사용합니다. [demo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/demo.py)와 [dataset](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/data/dataset.py)은 RGB resize 1600×533 뒤 아래 320행 crop을 구성합니다. decoder가 공급한 원본 W/H로 이미 복원한 점에는 crop/scale 역변환을 다시 적용하지 않습니다. row/column 표현·유효 slot을 보존해야 하며, 빠진 차선을 생략한 반환 list index를 물리 경계 ID로 쓰지 않습니다.
+
+고정 dataset 크기·30fps writer 대신 현재 원본 `Frame`·PTS를 유지하고, 필요한 회전 역변환과 가시 경계 구간을 검증할 계획입니다. 모델용 확대 입력은 원본 픽셀 증거나 현재 분석 축≤1024 지원 한계를 늘리지 않습니다. 좌표·RGB/crop·slot 소실·가림/자차 이동 검증과 실제 모델 smoke는 아직 수행하지 않았습니다.
 
 ### 2.2 Lamp ROI and signal candidates
 
