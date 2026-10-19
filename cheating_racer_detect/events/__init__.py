@@ -4,6 +4,8 @@ from .contracts import Candidate, LaneSection, Vehicle
 from .lane import LaneConfig, LaneEngine
 from .lamp import LampConfig, LampEngine, LampROI
 from .export import export_candidate
+from .sections import BoundaryBinding, LaneContext, LaneSectionBridge, section_for_vehicle
 
 __all__ = ['Candidate', 'LaneSection', 'Vehicle', 'LaneConfig', 'LaneEngine',
-           'LampConfig', 'LampEngine', 'LampROI', 'export_candidate']
+           'LampConfig', 'LampEngine', 'LampROI', 'export_candidate',
+           'BoundaryBinding', 'LaneContext', 'LaneSectionBridge', 'section_for_vehicle']
