@@ -110,6 +110,28 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
             '((1,"row",72),(2,"row",72),(0,"column",81),(3,"column",81))); '
             'print(json.dumps(LaneBatch(f,"fixture",0,s).report()))'], external, parsed=True)
         require(lane_contract['frame']['pts'] == 500 and len(lane_contract['slots']) == 4)
+        section_contract = child([python, '-I', '-c',
+            'from cheating_racer_detect.analysis import LaneBatch,LaneSlot; '
+            'from cheating_racer_detect.events import BoundaryBinding,LaneContext,LaneSectionBridge,'
+            'LaneConfig,Vehicle,section_for_vehicle; '
+            'from cheating_racer_detect.tracking import Frame,Box,Detection; '
+            'from fractions import Fraction as F; import json; '
+            'f=Frame("fixture",0,0,500,F(1,10),500,96,64); '
+            'v=Vehicle(f,(1,2,1),Detection(0,2,Box(20,10,30,30),.9,"fixture",f)); '
+            's=tuple(LaneSlot(i,a,(True,)*n,tuple((x,63.*j/(n-1)) for j in range(n))) '
+            'for i,a,n,x in ((1,"row",72,10.),(2,"row",72,48.),'
+            '(0,"column",81,86.),(3,"column",81,94.))); '
+            'b=LaneBatch(f,"lanes-fixture",0,s); '
+            'bindings=tuple(BoundaryBinding(i,k,(True,)*n) for i,k,n in '
+            '((1,"left",71),(2,"middle",71),(0,"right",80))); '
+            'c=LaneContext(f,v.identity,b.model_id,"fixture-context","road",bindings,'
+            'True,True,"stable","ordinary",True); '
+            'r=section_for_vehicle(f,v,b,c); '
+            'bridge=LaneSectionBridge(LaneConfig("fixture-policy",.15,F(1,5),F(3,5),10.)); '
+            'assert bridge.update(f,v,b,c)["lane"]["status"]=="warming"; '
+            'print(json.dumps(r.report()))'], external, parsed=True)
+        require(section_contract['section']['x'] == [10.,48.,86.] and
+                section_contract['status'] == 'ready' and section_contract['frame']['pts'] == 500)
         require(child([executable, '--version'], external).strip() == imported['version'])
         for action in ('list', 'replay', 'verify', 'evaluate'):
             child([executable, 'events', action, '--help'], external)
@@ -174,6 +196,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'sdist_rebuild': True, 'noneditable_external_cwd': True, 'base_ml_packages': False,
                   'base_list_candidates': 2, 'base_verify_source': True, 'dependency_error': missing['code'],
                   'base_lane_contract': True,
+                  'base_lane_section': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 

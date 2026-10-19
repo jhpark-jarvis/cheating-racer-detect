@@ -35,6 +35,7 @@ class Installed(unittest.TestCase):
         self.assertEqual(result['base_list_candidates'], 2)
         self.assertTrue(result['base_verify_source'])
         self.assertTrue(result['base_lane_contract'])
+        self.assertTrue(result['base_lane_section'])
         self.assertEqual(result['dependency_error'], 'DEPENDENCY_MISSING')
         self.assertEqual(result['optional']['status'], 'NOT_RUN')
         self.assertTrue(result['temporary_cleanup'])
