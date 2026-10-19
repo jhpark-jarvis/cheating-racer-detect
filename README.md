@@ -90,7 +90,24 @@ lanes = decode_ufld(frame, output)
 
 local-width 1의 ordinal expectation을 원본 view 비율로 복원하고, **실제 전처리에서 적용한 clockwise 회전**만 1회 역변환합니다. `rotation_cw=0`은 coded 입력이며 source display rotation을 자동 적용하지 않습니다. demo의 정수 truncation 대신 연속 좌표를 보존하며, grid 끝의 범위 초과·존재하지 않는 anchor는 clamp/외삽하지 않고 `None`으로 남깁니다. 슬롯이 사라져도 네 슬롯의 번호·mask·sample 위치는 유지됩니다.
 
-anchor-count support는 포맷 조건이지 실제 가시성·신뢰도·물리 경계 ID가 아닙니다. 이 API는 `LaneSection`이나 변경 사건을 만들지 않으며 차량 하단 y 단면·안정 ID·ego/scene/후면 자세 검증은 별도입니다. [숫자·회전·누락·실패 시험](tests/test_lane_decoder.py), [실제 합성 CFR/VFR/offset/회전 PTS 연결 시험](tests/test_lane_decoder_native.py)
+anchor-count support는 포맷 조건이지 실제 가시성·신뢰도·물리 경계 ID가 아닙니다. decoder 자체는 `LaneSection`이나 변경 사건을 만들지 않습니다. 차량 하단 y 단면과 명시적 외부 조건 연결은 아래 API로 구분합니다. [숫자·회전·누락·실패 시험](tests/test_lane_decoder.py), [실제 합성 CFR/VFR/offset/회전 PTS 연결 시험](tests/test_lane_decoder_native.py)
+
+#### Visibility-constrained lane sections
+
+[`section_for_vehicle`](cheating_racer_detect/events/sections.py)는 동일 `Frame`의 실제 `Vehicle` bbox 하단 `y2`에서 차선 곡선을 단면화합니다. 호출자가 **연속된 물리 경계의 좌→우 순서/ID**, 각 인접 anchor **구간 전체의 가시성**, coded 축 해석·자차 안정·일반 도로·후면 자세를 명시해야 합니다. 존재 마스크를 가시성으로 바꾸거나 모델 슬롯을 물리 ID로 자동 승격하지 않습니다. 조건은 caller 선언이며 실제 정확성·타이어 접점·ID 안정성의 인증이 아닙니다.
+
+가시성이 명시된 인접 두 sample 안에서만 선형 보간합니다. `None`을 건너뛰거나 지원 범위 밖으로 외삽하지 않으며, 수평 중첩·다중 교차·경계 순서 역전·가시 경계 부족은 `section=None`과 이유로 반환합니다. 필요한 경계를 버린 뒤 남은 곡선을 정렬해 새로운 인접 관계를 만들지 않습니다. 정상 결과도 원본 PTS와 사용 anchor bracket/보간 비율을 보존합니다.
+
+```python
+from cheating_racer_detect.events import LaneSectionBridge
+
+# lane_config는 명시 정책, context는 해당 Frame/차량/모델의 외부 확인 조건입니다.
+bridge = LaneSectionBridge(lane_config)
+result = bridge.update(frame, vehicle, lanes, context)
+candidate = result["lane"]["candidate"]  # 관측 불능이면 None
+```
+
+`LaneSectionBridge`는 독립 `LaneEngine`을 소유합니다. 차선 모델·적용 회전·context ID·도로/slot↔물리 ID 연결이 바뀌거나 조건이 unknown/실패/취소가 되면 사건 이력을 끊습니다. `context_id`는 시각별 ID가 아닌 해석/정책 출처를 식별합니다. 새 provenance는 아직 저장 입력/capture/replay schema에 자동 연결하지 않습니다. 자동 가시성·물리 ID·ego/scene/pose 추론과 실차 수락은 후속 과제입니다. [단면·이력 계약 시험](tests/test_lane_sections.py), [실제 합성 원본 연결 시험](tests/test_lane_sections_native.py)
 
 ### 2.2 Lamp ROI and signal candidates
 
@@ -436,8 +453,9 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 403개 PASS | CLI·설치/패키지 구성·차선 좌표/시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 428개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
+| 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
