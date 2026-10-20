@@ -16,12 +16,15 @@ from ..paths import local_path
 from ..service import _identity, _publish
 from ..tracking import Box, Detection, Frame
 from .contracts import LaneSection, Vehicle, current, identity, seconds
-from .lane import LaneConfig
+from .lane import LaneConfig, LaneEngine
 from .lamp import LampConfig, LampROI
+from .evidence import LaneEvidence
+from .sections import LaneSectionBridge
 
 MAX_BYTES = 1_048_576
 MAX_ROWS = 120
 SCHEMA = 'experimental-event-inputs-v1'
+PROVENANCE_SCHEMA = 'experimental-event-inputs-v2'
 
 
 def _json(value):
@@ -81,9 +84,15 @@ class InputFrame:
     lanes: LaneSection | None
     left: LampROI
     right: LampROI
+    lane_evidence: LaneEvidence | None = None
 
     def __post_init__(self):
         current(self.frame, self.vehicle)
+        if self.lane_evidence is not None:
+            if not isinstance(self.lane_evidence, LaneEvidence):
+                raise ValueError('Expected explicit immutable lane evidence')
+            if self.lane_evidence.section(self.frame, self.vehicle).section != self.lanes:
+                raise ValueError('Recorded lane section differs from its evidence')
         if self.lanes is not None:
             if (not isinstance(self.lanes, LaneSection) or self.lanes.frame != self.frame
                     or (self.vehicle is not None and self.lanes.y != self.vehicle.box.y2)):
@@ -101,13 +110,15 @@ class InputFrame:
         lane = None if self.lanes is None else {
             key: list(value) if isinstance(value, tuple) else value
             for key, value in vars(self.lanes).items() if key != 'frame'}
-        return {'frame': self.frame.report(), 'vehicle': None if self.vehicle is None else self.vehicle.report(),
+        return {**({} if self.lane_evidence is None else {'lane_evidence': self.lane_evidence.report()}),
+                'frame': self.frame.report(), 'vehicle': None if self.vehicle is None else self.vehicle.report(),
                 'lanes': lane, **{side: {'box': None if roi.box is None else list(roi.box.values()),
                                        'status': roi.status} for side, roi in (('left', self.left), ('right', self.right))}}
 
     @classmethod
-    def from_report(cls, value):
-        _fields(value, ('frame', 'vehicle', 'lanes', 'left', 'right'))
+    def from_report(cls, value, *, provenance=False):
+        names = ('frame', 'vehicle', 'lanes', 'left', 'right')
+        _fields(value, (*names, 'lane_evidence') if provenance else names)
         frame, vehicle = _frame(value['frame']), None
         if value['vehicle'] is not None:
             v = _fields(value['vehicle'], ('frame', 'identity', 'identity_status', 'detection'))
@@ -123,7 +134,8 @@ class InputFrame:
                 raise ValueError('Expected boundary arrays')
             lane = LaneSection(frame, lane['road_id'], tuple(lane['boundary_ids']), tuple(lane['x']),
                                lane['y'], lane['ego'], lane['scene'], lane['rear_view'])
-        return cls(frame, vehicle, lane, _roi(value['left']), _roi(value['right']))
+        evidence = LaneEvidence.from_report(frame, value['lane_evidence']) if provenance else None
+        return cls(frame, vehicle, lane, _roi(value['left']), _roi(value['right']), evidence)
 
 
 @dataclass(frozen=True)
@@ -144,9 +156,11 @@ class EventInputs:
         if not isinstance(self.rows, tuple) or not 1 <= len(self.rows) <= MAX_ROWS:
             raise ValueError('Expected 1..120 input frames')
         previous = reference = None
+        modes = set()
         for row in self.rows:
             if not isinstance(row, InputFrame):
                 raise ValueError('Expected immutable input frame')
+            modes.add(row.lane_evidence is not None)
             f = row.frame
             seconds(f.time)
             seconds(f.time_base, True)
@@ -159,12 +173,18 @@ class EventInputs:
                 raise ValueError('Duplicate/backward input receipt')
             if row.vehicle is not None and row.vehicle.identity != self.selected_identity:
                 raise ValueError('Input receipt mixes selected vehicle identities')
+            if (row.lane_evidence is not None and row.lane_evidence.context is not None
+                    and row.lane_evidence.context.vehicle_identity != self.selected_identity):
+                raise ValueError('Lane context belongs to a different selected identity')
             previous, reference = f, key
+        if len(modes) != 1:
+            raise ValueError('Cannot mix legacy and provenance input rows')
         if len(self.to_bytes()) > MAX_BYTES:
             raise ValueError('Input receipt exceeds 1MiB')
 
     def report(self):
-        return {'schema': SCHEMA, 'selected_identity': list(self.selected_identity),
+        schema = SCHEMA if self.rows[0].lane_evidence is None else PROVENANCE_SCHEMA
+        return {'schema': schema, 'selected_identity': list(self.selected_identity),
                 'lane_config': _config_report(self.lane_config), 'lamp_config': _config_report(self.lamp_config),
                 'pre': str(self.pre), 'post': str(self.post), 'rows': [row.report() for row in self.rows]}
 
@@ -192,14 +212,50 @@ class EventInputs:
                 raise ValueError('Non-finite JSON value')
             value = json.loads(data.decode('utf-8'), object_pairs_hook=pairs, parse_constant=constant)
             _fields(value, ('schema', 'selected_identity', 'lane_config', 'lamp_config', 'pre', 'post', 'rows'))
-            if value['schema'] != SCHEMA or type(value['rows']) is not list or not 1 <= len(value['rows']) <= MAX_ROWS:
+            if value['schema'] not in (SCHEMA, PROVENANCE_SCHEMA) or type(value['rows']) is not list or not 1 <= len(value['rows']) <= MAX_ROWS:
                 raise ValueError('Unknown schema or row limit')
             return cls(_config(value['lane_config'], LaneConfig, ('dwell', 'max_gap')),
                        _config(value['lamp_config'], LampConfig, ('min_window', 'max_gap', 'min_phase', 'max_phase')),
                        _exact(value['pre']), _exact(value['post']), tuple(_array(value['selected_identity'], 3)),
-                       tuple(InputFrame.from_report(row) for row in value['rows']))
+                       tuple(InputFrame.from_report(row, provenance=value['schema'] == PROVENANCE_SCHEMA)
+                             for row in value['rows']))
         except (TypeError, ValueError, KeyError, AttributeError, OverflowError, ZeroDivisionError, RecursionError):
             raise AppError('INVALID_INPUTS', '관측 입력의 형식·출처·설정·자원 한계를 확인하세요.') from None
+
+
+class InputLaneEngine:
+    """One replay policy shared by source replay and read-only bundle audit.
+
+    v1 preserves historical injected-section semantics. v2 recomputes geometry
+    and source resets; no persisted marker can suppress an unknown or change.
+    A malformed/mixed update or cancellation discards BOTH histories.
+    """
+    def __init__(self, config):
+        self._legacy = LaneEngine(config)
+        self._bridge = LaneSectionBridge(config)
+        self._mode = None
+
+    def reset(self):
+        self._legacy.reset()
+        self._bridge.reset()
+        self._mode = None
+
+    def update(self, row):
+        try:
+            if not isinstance(row, InputFrame):
+                raise ValueError('Expected immutable recorded input row')
+            mode = row.lane_evidence is not None
+            if self._mode is not None and mode != self._mode:
+                raise ValueError('Cannot mix legacy and provenance histories')
+            self._mode = mode
+            if not mode:
+                return {'lane': self._legacy.update(row.frame, row.vehicle, row.lanes),
+                        'section': None, 'reset_reason': None}
+            evidence = row.lane_evidence
+            return self._bridge.update(row.frame, row.vehicle, evidence.batch, evidence.context)
+        except BaseException:
+            self.reset()
+            raise
 
 
 @contextmanager

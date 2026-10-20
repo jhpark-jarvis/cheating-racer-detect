@@ -13,15 +13,21 @@ from .contracts import Vehicle, identity, seconds
 from .inputs import EventInputs, InputFrame, _json, owned_output, write_bytes
 from .lamp import LampConfig, LampROI
 from .lane import LaneConfig
+from .evidence import LaneEvidence
 
 
 @source_job
 def capture_inputs(input_path, start, end, output_path, bridge, *, selected_identity,
-                   lane_config, lamp_config, pre, post, gates=None, toolchain=None):
+                   lane_config, lamp_config, pre, post, gates=None, toolchain=None,
+                   lane_observations=None):
     """Fresh single-owner bridge required; explicit identity never auto-remapped.
 
     gates(Frame, Vehicle|None) -> (LaneSection|None, left LampROI, right LampROI).
-    Without gates all lanes/ROIs stay unknown. Source <=1024 and <=120 selected
+    Optional lane_observations(Frame, Vehicle|None) -> (LaneBatch|None,
+    LaneContext|None) records v2 evidence on EVERY row, including unknown. In
+    this mode gates must return lane=None; geometry is derived, not supplied twice.
+    Without either lane callback lanes stay unknown; without gates ROIs stay
+    unknown. Source <=1024 and <=120 selected
     frames. No loader, network, lane/pose/ROI model, predictions or GT assertion.
     Failed/cancelled jobs reset the supplied tracker before a fresh retry.
     """
@@ -31,6 +37,8 @@ def capture_inputs(input_path, start, end, output_path, bridge, *, selected_iden
         selected_identity = identity(selected_identity)
         if gates is not None and not callable(gates):
             raise ValueError('Invalid gates')
+        if lane_observations is not None and not callable(lane_observations):
+            raise ValueError('Invalid lane observation callback')
         # Validate all configurations and scalar bounds before decoding.
         seconds(pre, True)
         seconds(post, True)
@@ -51,7 +59,16 @@ def capture_inputs(input_path, start, end, output_path, bridge, *, selected_iden
                 tracking = bridge.update(frame, pixels)['tracking']
                 vehicle = Vehicle.from_tracking(frame, tracking, selected_identity)
                 lane, left, right = (None, LampROI(None, 'model_uncertain'), LampROI(None, 'model_uncertain')) if gates is None else gates(frame, vehicle)
-                rows.append(InputFrame(frame, vehicle, lane, left, right))
+                evidence = None
+                if lane_observations is not None:
+                    if lane is not None:
+                        raise ValueError('Cannot supply both lane section and lane evidence')
+                    observation = lane_observations(frame, vehicle)
+                    if type(observation) not in (tuple, list) or len(observation) != 2:
+                        raise ValueError('Expected materialized lane batch/context pair')
+                    evidence = LaneEvidence(*observation)
+                    lane = evidence.section(frame, vehicle).section
+                rows.append(InputFrame(frame, vehicle, lane, left, right, evidence))
         inputs = EventInputs(lane_config, lamp_config, pre, post, selected_identity, tuple(rows))
         with owned_output(output_path) as stage:
             write_bytes(stage/'inputs.json', inputs.to_bytes())

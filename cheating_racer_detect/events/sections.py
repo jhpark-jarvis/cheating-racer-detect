@@ -162,7 +162,8 @@ def section_for_vehicle(frame, vehicle, batch, context):
     Malformed/foreign declarations raise ValueError. No NumPy, pixels or IO.
     Independent calls must not be used to hide model/context source changes
     from a long-lived LaneEngine; use LaneSectionBridge for live accumulation.
-    New provenance is NOT automatically persisted in existing saved inputs.
+    Use explicit LaneEvidence/InputFrame v2 for persisted provenance; legacy v1
+    injected sections do not carry this evidence.
     """
     current(frame, vehicle)
     if batch is not None and (not isinstance(batch, LaneBatch) or batch.frame != frame):
@@ -211,8 +212,8 @@ def section_for_vehicle(frame, vehicle, batch, context):
 class LaneSectionBridge:
     """Owns a fresh LaneEngine, resetting on lane-source uncertainty/change.
 
-    Does not serialize a new receipt into capture/replay schema. Numerical
-    lane-event policy remains explicit caller-owned LaneConfig, not calibrated.
+    Persistence uses explicit LaneEvidence/InputFrame v2. Numerical lane-event
+    policy remains explicit caller-owned LaneConfig, not calibrated.
     """
     def __init__(self, config):
         self._engine = LaneEngine(config)

@@ -14,9 +14,8 @@ from ..tools import discover_tools
 from .catalog import CandidateCatalog, _side, _signal
 from .contracts import Candidate
 from .export import candidate_context
-from .inputs import EventInputs, MAX_BYTES, _exact, _fields, _frame, _json
+from .inputs import EventInputs, InputLaneEngine, MAX_BYTES, _exact, _fields, _frame, _json
 from .replay import _selection, analyze_inputs, recorded_observer
-from .lane import LaneEngine
 
 
 def require(condition):
@@ -192,10 +191,10 @@ def verify_batch(folder, *, source=None, toolchain=None):
         require(type(manifest['selected_count']) is int and len(indices) == manifest['selected_count'])
         require(type(manifest['candidates']) is list and len(manifest['candidates']) == len(indices))
         require(all(i < manifest['candidate_count'] for i in indices))
-        lane_engine = LaneEngine(inputs.lane_config)
+        lane_engine = InputLaneEngine(inputs.lane_config)
         recorded_candidates = []
         for row in inputs.rows:
-            event = lane_engine.update(row.frame, row.vehicle, row.lanes)['candidate']
+            event = lane_engine.update(row)['lane']['candidate']
             if event is not None:
                 recorded_candidates.append(event)
         require(len(recorded_candidates) == manifest['candidate_count'])
