@@ -143,6 +143,15 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         fixture.mkdir()
         source, inputs = generate_inputs(tools, fixture)
         original_hash = _sha256(source)
+        # Keep legacy execution coverage, then exercise actual installed CLI
+        # with the new explicit synthetic v2 evidence (including offline audit).
+        save_inputs(inputs, fixture/'legacy')
+        legacy_listing = child([executable, 'events', 'list', '--input', source,
+            '--inputs', fixture/'legacy/inputs.json', '--output', fixture/'legacy-list',
+            '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
+        require(legacy_listing['candidate_count'] == 2)
+        from .demo_lane_replay import with_lane_evidence
+        inputs = with_lane_evidence(inputs)
         save_inputs(inputs, fixture/'recorded')
         record = fixture/'recorded/inputs.json'
         child([executable, 'clip', '--input', source, '--start', '0.35', '--end', '0.85',
@@ -165,6 +174,9 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         verified = child([executable, 'events', 'verify', '--bundle', fixture/'prepared', '--input', source,
                           '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
         require(verified['status'] == 'verified' and verified['source_replayed'])
+        verified_offline = child([executable, 'events', 'verify', '--bundle', fixture/'prepared',
+                                 '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
+        require(verified_offline['status'] == 'verified')
         child([executable, 'events', 'evaluate', '--labels', fixture/'missing'], external, expected=2, parsed=True)
         optional = {'status': 'NOT_RUN', 'reason': 'No existing offline cache requested'}
         if cache is not None:
@@ -197,6 +209,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'base_list_candidates': 2, 'base_verify_source': True, 'dependency_error': missing['code'],
                   'base_lane_contract': True,
                   'base_lane_section': True,
+                  'base_lane_provenance': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 
