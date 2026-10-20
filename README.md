@@ -70,7 +70,7 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 **학습 utility를 제거한 ResNet-18 구조**는 난수 가중치로 CPU/GPU 합성 forward를 확인했습니다. 학습 가중치를 적용한 탐지 결과가 아니며 정확한 checkpoint 조건·실제 로딩과 실차 평가는 남아 있습니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
 
-연결안은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 안정 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 아래 decoder는 좌표 복원까지만 지원하며 `LaneSection` 연결 adapter는 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
+연결 흐름은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 외부 물리 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 좌표 decoder와 외부 조건 기반 단면 adapter는 구현됐지만, 조건 자체의 자동 인식은 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
 UFLDv2의 [고정 config](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/configs/culane_res18.py)는 입력 1600×320·crop ratio 0.6·4 lane slots를 사용합니다. [demo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/demo.py)와 [dataset](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/data/dataset.py)은 RGB resize 1600×533 뒤 아래 320행 crop을 구성합니다. decoder가 공급한 원본 W/H로 이미 복원한 점에는 crop/scale 역변환을 다시 적용하지 않습니다. row/column 표현·유효 slot을 보존해야 하며, 빠진 차선을 생략한 반환 list index를 물리 경계 ID로 쓰지 않습니다.
 
@@ -107,7 +107,7 @@ result = bridge.update(frame, vehicle, lanes, context)
 candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 ```
 
-`LaneSectionBridge`는 독립 `LaneEngine`을 소유합니다. 차선 모델·적용 회전·context ID·도로/slot↔물리 ID 연결이 바뀌거나 조건이 unknown/실패/취소가 되면 사건 이력을 끊습니다. `context_id`는 시각별 ID가 아닌 해석/정책 출처를 식별합니다. 새 provenance는 아직 저장 입력/capture/replay schema에 자동 연결하지 않습니다. 자동 가시성·물리 ID·ego/scene/pose 추론과 실차 수락은 후속 과제입니다. [단면·이력 계약 시험](tests/test_lane_sections.py), [실제 합성 원본 연결 시험](tests/test_lane_sections_native.py)
+`LaneSectionBridge`는 독립 `LaneEngine`을 소유합니다. 차선 모델·적용 회전·context ID·도로/slot↔물리 ID 연결이 바뀌거나 조건이 unknown/실패/취소가 되면 사건 이력을 끊습니다. `context_id`는 시각별 ID가 아닌 해석/정책 출처를 식별합니다. 저장·재생에는 §3.6의 명시적 v2 evidence를 사용합니다. 자동 가시성·물리 ID·ego/scene/pose 추론과 실차 수락은 후속 과제입니다. [단면·이력 계약 시험](tests/test_lane_sections.py), [실제 합성 원본 연결 시험](tests/test_lane_sections_native.py)
 
 ### 2.2 Lamp ROI and signal candidates
 
@@ -228,6 +228,27 @@ candidate-001/
 [입력 기록](cheating_racer_detect/events/inputs.py)은 선택 차량의 실제 관측/미관측, 차선·자차 상태, 좌우 ROI·가시성, 모든 분석 설정과 앞뒤 맥락을 보관합니다. [재생기](cheating_racer_detect/events/replay.py)는 원본 SHA-256·정수 PTS·time base·크기를 검사하고 원본 픽셀로 후보와 램프 결과를 다시 계산합니다. 타 차량이나 운동 예측을 재추적하지 않으며 빠진 프레임·가림은 `unknown`으로 유지합니다.
 
 실험용 JSON은 1 MiB·120개 입력 프레임으로 제한합니다. 중복/알 수 없는 필드·비정규 시간·비유한 수치를 거부하며, 전체 설정을 담은 canonical bytes의 해시로 실행 입력을 구분합니다. 해시는 위변조 인증이나 관측의 사실성을 보증하지 않습니다. 원본 영상은 별도로 보관해야 하며 다른 코드 버전의 동일 결과나 동일 MP4 바이트를 보장하지 않습니다.
+
+| 저장 형식 | 차선 근거·재생 정책 |
+| --- | --- |
+| `experimental-event-inputs-v1` | 기존 주입 단면·설정의 canonical bytes/읽기/재생 호환 유지. 차선 모델·가시 구간·맥락 출처는 포함하지 않음 |
+| `experimental-event-inputs-v2` | 모든 행에 `LaneEvidence`: 네 slot의 좌표/누락/존재 mask·모델/적용 회전·외부 물리 ID/구간 가시성/맥락 선언. 동일 원본 Frame/차량에 연결하고 저장 단면을 재계산해 대조 |
+
+v2 재생과 원본 없는 batch 검사도 같은 source-aware 엔진을 사용합니다. 모델·회전·맥락/경계 연결 변경 또는 unknown에서 이력을 끊으며, reset marker를 임의로 주입하지 않습니다. `analyze_inputs(...).lane_resets`는 원본 `Frame`과 재계산된 차선 출처 단절 사유를 반환합니다. 원본 PTS·관측 단절 검사는 그대로 유지합니다.
+
+```python
+from cheating_racer_detect.events import LaneEvidence
+from cheating_racer_detect.events.inputs import InputFrame
+
+evidence = LaneEvidence(lanes, context)  # 동일 Frame의 외부 관측/선언
+section = evidence.section(frame, vehicle).section
+row = InputFrame(frame, vehicle, section, left_roi, right_roi,
+                 lane_evidence=evidence)
+```
+
+`EventInputs`의 모든 행에 evidence를 지정하면 v2로 저장합니다. 관측 불능도 `LaneEvidence(None, None)`으로 명시하며, v1/v2 행 혼합·v2 출처 누락/null·단면 불일치는 거부합니다. [`capture_inputs`](cheating_racer_detect/events/capture.py)의 `lane_observations(frame, vehicle) → (LaneBatch | None, LaneContext | None)`도 v2를 생성합니다. 이때 기존 `gates` callback은 좌우 ROI와 `lane=None`을 반환해야 합니다. 단면과 출처를 이중 공급하지 않습니다.
+
+상세 좌표도 1 MiB 한도에 포함되므로 120행 전에 크기 제한에 도달할 수 있습니다. 출처 변경/삭제는 입력 해시를 바꾸어 기존 목록·묶음과의 연결을 무효화하지만, 전체 문서와 해시를 함께 재작성한 사람의 진위까지 인증하지는 않습니다. 외부 가시성·ID·의미 선언은 끝까지 **caller asserted / unverified**입니다. [저장 계약 시험](tests/test_lane_evidence.py), [실제 저장→목록→클립→재검사 시험](tests/test_lane_evidence_native.py)
 
 ```text
 replay-001/
@@ -387,6 +408,7 @@ python -m scripts.demo_review --profile vfr --output "D:\review-demo-001"
 python -m scripts.demo_events --output "D:\candidate-demo-001"
 python -m scripts.demo_replay --output "D:\replay-demo-001"
 python -m scripts.demo_batch_replay --output "D:\batch-demo-001"
+python -m scripts.demo_lane_replay --output "D:\lane-replay-demo-001"
 python -m scripts.benchmark_events --no-reuse
 python -m scripts.benchmark_events
 python -m scripts.benchmark_scaling --seconds 300 --window tail --no-reuse
@@ -403,6 +425,8 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 ```
 
 두 선택 옵션은 함께 사용할 수 없습니다. 후보 번호는 `analyze_inputs(source, inputs).candidates`의 순서입니다. 일괄 API의 `candidate_indices`는 중복 없는 정수 list/tuple(1~120개)이며, CLI도 같은 선택 규칙을 적용합니다. [일괄 합성 데모](scripts/demo_batch_replay.py)는 자체 44프레임 영상의 우측→좌측 변경과 좌우 점멸을 주입해 저장/읽기/재생/두 클립을 연결합니다. 차량 탐지 모델의 결과나 실제 사건 정답이 아닙니다.
+
+[차선 출처 데모](scripts/demo_lane_replay.py)는 같은 합성 시나리오에 명시적 곡선/물리 ID/가시성·맥락을 주입해 v2 저장→목록→역순 두 후보 클립을 연결합니다. 자동 차선 모델의 결과가 아니며, `crd events`의 기존 list/replay/verify 명령은 v1과 v2를 모두 읽습니다.
 
 먼저 [목록 명령](scripts/list_events.py)으로 번호·방향·시간·점멸/unknown 사유를 확인하고, 원하는 번호만 선택할 수 있습니다. `--catalog`는 `--candidate-indices`와 함께 사용합니다.
 
@@ -453,9 +477,10 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 428개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 452개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/출처 저장·시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
+| 차선 출처 저장·재생 | v1 호환·v2 roundtrip·44프레임 두 후보/맥락 변경·실제 capture/CLI | 좌표/mask/맥락 해시 연결·단면 재계산·source reset 재현·원본 유/무 readonly batch 검사·출처 누락/목록 drift 거부·실패/취소/정리 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
