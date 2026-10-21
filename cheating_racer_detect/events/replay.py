@@ -13,7 +13,7 @@ from ..source import release_pixels, source_job
 from ..tools import discover_tools
 from ..tracking.contracts import integer
 from .export import decimal_bound, export_candidate, validate_frame
-from .inputs import EventInputs, InputLaneEngine, MAX_ROWS, owned_output, write_bytes
+from .inputs import EventInputs, InputLaneEngine, InputLampEngine, MAX_ROWS, owned_output, write_bytes
 from .lamp import LampEngine
 
 
@@ -22,6 +22,7 @@ class ReplayAnalysis:
     candidates: tuple
     lamps: LampEngine
     lane_resets: tuple = ()  # (original Frame, recomputed lane-source reason)
+    lamp_resets: tuple = ()  # v3 ROI-source discontinuities, not lamp semantics
 
 
 @source_job
@@ -45,8 +46,10 @@ def _analyze_inputs(input_path, inputs, toolchain):
         decimal_bound(first.time, ROUND_FLOOR), decimal_bound(last.time+last.time_base, ROUND_CEILING), tools)
     for row in inputs.rows:
         validate_frame(row.frame, source_hash, video, timeline, rotation)
-    lane, lamp = InputLaneEngine(inputs.lane_config), LampEngine(inputs.lamp_config)
-    events, resets, rows = [], [], {row.frame.ordinal: row for row in inputs.rows}
+    lane = InputLaneEngine(inputs.lane_config)
+    lamp = (LampEngine(inputs.lamp_config) if inputs.rows[0].lamp_evidence is None
+            else InputLampEngine(inputs.lamp_config))
+    events, resets, lamp_resets, rows = [], [], [], {row.frame.ordinal: row for row in inputs.rows}
     with pixel_window(source, tools, video, timeline, ordinal, len(selected), complete=True) as stream:
         size = first.width*first.height*3
         for n in range(len(selected)):
@@ -58,13 +61,18 @@ def _analyze_inputs(input_path, inputs, toolchain):
             event = result['lane']['candidate']
             if result['reset_reason'] is not None:
                 resets.append((row.frame, result['reset_reason']))
-            lamp.update(row.frame, row.vehicle, pixels, row.left, row.right)
+            if isinstance(lamp,InputLampEngine):
+                observed=lamp.update_recorded(row,pixels)
+                if observed['reset_reason'] is not None:
+                    lamp_resets.append((row.frame,observed['reset_reason']))
+            else:
+                lamp.update(row.frame,row.vehicle,pixels,row.left,row.right)
             if event is not None:
                 events.append(event)
     local_path(source)
     if before != _identity(source) or source_hash != _sha256(source):
         raise AppError('INPUT_CHANGED', '재생 중 원본 영상이 변경되었습니다.')
-    return ReplayAnalysis(tuple(events), lamp, tuple(resets))
+    return ReplayAnalysis(tuple(events), lamp, tuple(resets),tuple(lamp_resets))
 
 
 def recorded_observer(inputs):

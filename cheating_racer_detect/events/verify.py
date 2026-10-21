@@ -14,7 +14,7 @@ from ..tools import discover_tools
 from .catalog import CandidateCatalog, _side, _signal
 from .contracts import Candidate
 from .export import candidate_context
-from .inputs import EventInputs, InputLaneEngine, MAX_BYTES, _exact, _fields, _frame, _json
+from .inputs import EventInputs, InputLaneEngine, MAX_BYTES, _exact, _fields, _frame, _json, lamp_source_floor
 from .replay import _selection, analyze_inputs, recorded_observer
 
 
@@ -245,6 +245,11 @@ def verify_batch(folder, *, source=None, toolchain=None):
                 require(lamp['schema'] == 'experimental-lamp-window-v1' and lamp['config'] == inputs.lamp_config.report()
                         and lamp['identity_status'] == 'unverified' and lamp['identity'] in (None, list(inputs.selected_identity)))
                 require(type(lamp['samples']) is list and len(lamp['samples']) <= 120)
+                if lamp['samples']:
+                    first_sample=_frame(lamp['samples'][0]['vehicle']['frame'])
+                    last_sample_frame=_frame(lamp['samples'][-1]['vehicle']['frame'])
+                    floor=lamp_source_floor(inputs,last_sample_frame.ordinal)
+                    require(floor is None or first_sample.ordinal>=floor)
                 for side in ('left', 'right'):
                     summary = lamp[side]
                     _fields(summary, ('state', 'blink_evidence', 'complete_cycles', 'reasons', 'valid_samples'))

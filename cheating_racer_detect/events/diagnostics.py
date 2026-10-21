@@ -12,7 +12,6 @@ from ..analysis.lanes import DECODER_ID
 from ..paths import local_path
 from ..service import _identity
 from .inputs import EventInputs, InputLaneEngine, MAX_BYTES, _json
-from .inputs import SCHEMA as LEGACY_SCHEMA, PROVENANCE_SCHEMA
 
 SCHEMA = 'experimental-lane-diagnostics-v1'
 
@@ -70,7 +69,7 @@ def _replay_diagnostics(inputs):
                      'source_reset_reason': result['reset_reason']})
     report = {'schema': SCHEMA, 'inputs_sha256': inputs.sha256,
               'source_sha256': inputs.rows[0].frame.source_id,
-              'input_schema': LEGACY_SCHEMA if inputs.rows[0].lane_evidence is None else PROVENANCE_SCHEMA,
+              'input_schema': inputs.schema,
               'declaration_status': 'caller_asserted_unverified',
               'counts': {**counts, 'candidate_count': len(candidates)},
               'reason_counts': {k: dict(sorted(v.items())) for k,v in reasons.items()}, 'rows': rows}

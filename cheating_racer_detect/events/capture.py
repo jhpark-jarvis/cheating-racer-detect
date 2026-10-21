@@ -14,18 +14,21 @@ from .inputs import EventInputs, InputFrame, _json, owned_output, write_bytes
 from .lamp import LampConfig, LampROI
 from .lane import LaneConfig
 from .evidence import LaneEvidence
+from .lamp_observations import LampEvidence
 
 
 @source_job
 def capture_inputs(input_path, start, end, output_path, bridge, *, selected_identity,
                    lane_config, lamp_config, pre, post, gates=None, toolchain=None,
-                   lane_observations=None):
+                   lane_observations=None,lamp_observations=None):
     """Fresh single-owner bridge required; explicit identity never auto-remapped.
 
     gates(Frame, Vehicle|None) -> (LaneSection|None, left LampROI, right LampROI).
     Optional lane_observations(Frame, Vehicle|None) -> (LaneBatch|None,
     LaneContext|None) records v2 evidence on EVERY row, including unknown. In
     this mode gates must return lane=None; geometry is derived, not supplied twice.
+    lamp_observations(Frame, Vehicle|None) -> LampObservation|None records v3;
+    gates must leave both ROI values at LampROI(None, 'model_uncertain').
     Without either lane callback lanes stay unknown; without gates ROIs stay
     unknown. Source <=1024 and <=120 selected
     frames. No loader, network, lane/pose/ROI model, predictions or GT assertion.
@@ -39,6 +42,8 @@ def capture_inputs(input_path, start, end, output_path, bridge, *, selected_iden
             raise ValueError('Invalid gates')
         if lane_observations is not None and not callable(lane_observations):
             raise ValueError('Invalid lane observation callback')
+        if lamp_observations is not None and not callable(lamp_observations):
+            raise ValueError('Invalid lamp observation callback')
         # Validate all configurations and scalar bounds before decoding.
         seconds(pre, True)
         seconds(post, True)
@@ -68,7 +73,13 @@ def capture_inputs(input_path, start, end, output_path, bridge, *, selected_iden
                         raise ValueError('Expected materialized lane batch/context pair')
                     evidence = LaneEvidence(*observation)
                     lane = evidence.section(frame, vehicle).section
-                rows.append(InputFrame(frame, vehicle, lane, left, right, evidence))
+                lamps=None
+                if lamp_observations is not None:
+                    if (left,right)!=(LampROI(None,'model_uncertain'),LampROI(None,'model_uncertain')):
+                        raise ValueError('Cannot supply both ROI gates and lamp evidence')
+                    lamps=LampEvidence(lamp_observations(frame,vehicle))
+                    left,right=lamps.rois(frame,vehicle)
+                rows.append(InputFrame(frame, vehicle, lane, left, right, evidence,lamps))
         inputs = EventInputs(lane_config, lamp_config, pre, post, selected_identity, tuple(rows))
         with owned_output(output_path) as stage:
             write_bytes(stage/'inputs.json', inputs.to_bytes())

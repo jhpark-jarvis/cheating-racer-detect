@@ -20,11 +20,13 @@ from .lane import LaneConfig, LaneEngine
 from .lamp import LampConfig, LampROI
 from .evidence import LaneEvidence
 from .sections import LaneSectionBridge
+from .lamp_observations import LampEvidence, LampObservationEngine, lamp_source_key
 
 MAX_BYTES = 1_048_576
 MAX_ROWS = 120
 SCHEMA = 'experimental-event-inputs-v1'
 PROVENANCE_SCHEMA = 'experimental-event-inputs-v2'
+LAMP_SCHEMA = 'experimental-event-inputs-v3'
 
 
 def _json(value):
@@ -85,9 +87,15 @@ class InputFrame:
     left: LampROI
     right: LampROI
     lane_evidence: LaneEvidence | None = None
+    lamp_evidence: LampEvidence | None = None
 
     def __post_init__(self):
         current(self.frame, self.vehicle)
+        if self.lamp_evidence is not None:
+            if not isinstance(self.lamp_evidence,LampEvidence):
+                raise ValueError('Expected explicit immutable lamp evidence')
+            if self.lamp_evidence.rois(self.frame,self.vehicle)!=(self.left,self.right):
+                raise ValueError('Stored lamp ROIs differ from their evidence')
         if self.lane_evidence is not None:
             if not isinstance(self.lane_evidence, LaneEvidence):
                 raise ValueError('Expected explicit immutable lane evidence')
@@ -111,14 +119,16 @@ class InputFrame:
             key: list(value) if isinstance(value, tuple) else value
             for key, value in vars(self.lanes).items() if key != 'frame'}
         return {**({} if self.lane_evidence is None else {'lane_evidence': self.lane_evidence.report()}),
+                **({} if self.lamp_evidence is None else {'lamp_evidence': self.lamp_evidence.report()}),
                 'frame': self.frame.report(), 'vehicle': None if self.vehicle is None else self.vehicle.report(),
                 'lanes': lane, **{side: {'box': None if roi.box is None else list(roi.box.values()),
                                        'status': roi.status} for side, roi in (('left', self.left), ('right', self.right))}}
 
     @classmethod
-    def from_report(cls, value, *, provenance=False):
+    def from_report(cls, value, *, provenance=False, lamp_provenance=False):
         names = ('frame', 'vehicle', 'lanes', 'left', 'right')
-        _fields(value, (*names, 'lane_evidence') if provenance else names)
+        _fields(value, names+(('lane_evidence',) if provenance else ())
+                +(('lamp_evidence',) if lamp_provenance else ()))
         frame, vehicle = _frame(value['frame']), None
         if value['vehicle'] is not None:
             v = _fields(value['vehicle'], ('frame', 'identity', 'identity_status', 'detection'))
@@ -135,7 +145,8 @@ class InputFrame:
             lane = LaneSection(frame, lane['road_id'], tuple(lane['boundary_ids']), tuple(lane['x']),
                                lane['y'], lane['ego'], lane['scene'], lane['rear_view'])
         evidence = LaneEvidence.from_report(frame, value['lane_evidence']) if provenance else None
-        return cls(frame, vehicle, lane, _roi(value['left']), _roi(value['right']), evidence)
+        lamps = LampEvidence.from_report(frame,value['lamp_evidence']) if lamp_provenance else None
+        return cls(frame, vehicle, lane, _roi(value['left']), _roi(value['right']), evidence,lamps)
 
 
 @dataclass(frozen=True)
@@ -160,7 +171,7 @@ class EventInputs:
         for row in self.rows:
             if not isinstance(row, InputFrame):
                 raise ValueError('Expected immutable input frame')
-            modes.add(row.lane_evidence is not None)
+            modes.add((row.lane_evidence is not None,row.lamp_evidence is not None))
             f = row.frame
             seconds(f.time)
             seconds(f.time_base, True)
@@ -183,10 +194,17 @@ class EventInputs:
             raise ValueError('Input receipt exceeds 1MiB')
 
     def report(self):
-        schema = SCHEMA if self.rows[0].lane_evidence is None else PROVENANCE_SCHEMA
-        return {'schema': schema, 'selected_identity': list(self.selected_identity),
+        return {'schema': self.schema,
+                **({'lane_provenance':self.rows[0].lane_evidence is not None} if self.schema==LAMP_SCHEMA else {}),
+                'selected_identity': list(self.selected_identity),
                 'lane_config': _config_report(self.lane_config), 'lamp_config': _config_report(self.lamp_config),
                 'pre': str(self.pre), 'post': str(self.post), 'rows': [row.report() for row in self.rows]}
+
+    @property
+    def schema(self):
+        if self.rows[0].lamp_evidence is not None:
+            return LAMP_SCHEMA
+        return SCHEMA if self.rows[0].lane_evidence is None else PROVENANCE_SCHEMA
 
     def to_bytes(self):
         return (_json(self.report())+'\n').encode('utf-8')
@@ -211,13 +229,20 @@ class EventInputs:
             def constant(_value):
                 raise ValueError('Non-finite JSON value')
             value = json.loads(data.decode('utf-8'), object_pairs_hook=pairs, parse_constant=constant)
-            _fields(value, ('schema', 'selected_identity', 'lane_config', 'lamp_config', 'pre', 'post', 'rows'))
-            if value['schema'] not in (SCHEMA, PROVENANCE_SCHEMA) or type(value['rows']) is not list or not 1 <= len(value['rows']) <= MAX_ROWS:
+            if type(value) is not dict:
+                raise ValueError('Expected receipt object')
+            lamp_mode=value.get('schema')==LAMP_SCHEMA
+            names=('schema', 'selected_identity', 'lane_config', 'lamp_config', 'pre', 'post', 'rows')
+            _fields(value,names+(('lane_provenance',) if lamp_mode else ()))
+            if lamp_mode and type(value['lane_provenance']) is not bool:
+                raise ValueError('Explicit v3 lane provenance mode required')
+            if value['schema'] not in (SCHEMA, PROVENANCE_SCHEMA,LAMP_SCHEMA) or type(value['rows']) is not list or not 1 <= len(value['rows']) <= MAX_ROWS:
                 raise ValueError('Unknown schema or row limit')
+            lane_mode=value['lane_provenance'] if lamp_mode else value['schema']==PROVENANCE_SCHEMA
             return cls(_config(value['lane_config'], LaneConfig, ('dwell', 'max_gap')),
                        _config(value['lamp_config'], LampConfig, ('min_window', 'max_gap', 'min_phase', 'max_phase')),
                        _exact(value['pre']), _exact(value['post']), tuple(_array(value['selected_identity'], 3)),
-                       tuple(InputFrame.from_report(row, provenance=value['schema'] == PROVENANCE_SCHEMA)
+                       tuple(InputFrame.from_report(row, provenance=lane_mode,lamp_provenance=lamp_mode)
                              for row in value['rows']))
         except (TypeError, ValueError, KeyError, AttributeError, OverflowError, ZeroDivisionError, RecursionError):
             raise AppError('INVALID_INPUTS', '관측 입력의 형식·출처·설정·자원 한계를 확인하세요.') from None
@@ -256,6 +281,51 @@ class InputLaneEngine:
         except BaseException:
             self.reset()
             raise
+
+
+class InputLampEngine(LampObservationEngine):
+    """v1/v2 retain injected ROI policy; v3 recomputes source-aware ROIs.
+
+    Inherits the existing LampEngine report/identity/frames interface for export.
+    update_recorded is the replay entry point, not the base manual ROI update.
+    """
+    def reset(self):
+        super().reset()
+        self._mode=None
+
+    def update_recorded(self,row,pixels):
+        from .lamp import LampEngine
+        try:
+            if not isinstance(row,InputFrame):
+                raise ValueError('Expected immutable recorded input row')
+            mode=row.lamp_evidence is not None
+            if self._mode is not None and mode!=self._mode:
+                raise ValueError('Cannot mix legacy and lamp-evidence history')
+            if mode:
+                result=super().update(row.frame,row.vehicle,pixels,row.lamp_evidence.observation)
+            else:
+                result={'lamp':LampEngine.update(self,row.frame,row.vehicle,pixels,row.left,row.right),
+                        'reset_reason':None,'left':row.left,'right':row.right}
+            self._mode=mode
+            return result
+        except BaseException:
+            self.reset()
+            raise
+
+
+def lamp_source_floor(inputs,last_ordinal):
+    """Latest v3 source reset at/before a recorded sample (no pixel assertion)."""
+    source=floor=None
+    for row in inputs.rows:
+        if row.frame.ordinal>last_ordinal:
+            break
+        if row.lamp_evidence is None:
+            return None
+        key=lamp_source_key(row.lamp_evidence.observation)
+        if key is None or source is not None and key!=source:
+            floor=row.frame.ordinal
+        source=key
+    return floor
 
 
 @contextmanager
