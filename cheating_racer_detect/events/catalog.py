@@ -185,6 +185,20 @@ def load_catalog(path):
 @source_job
 def export_catalog(input_path, inputs, output_path, *, toolchain=None):
     """Fresh source analysis -> compact catalogue + inputs, with no media output."""
+    return _export_listing(input_path, inputs, output_path, toolchain, False)[0]
+
+
+@source_job
+def export_catalog_with_diagnostics(input_path, inputs, output_path, *, toolchain=None):
+    """Explicit opt-in: atomically publish inputs, unchanged catalog-v1 and lanes.
+
+    Returns (CandidateCatalog, owned diagnostic dict). The sidecar is descriptive,
+    not a new trusted catalogue/batch schema or an analysis cache.
+    """
+    return _export_listing(input_path, inputs, output_path, toolchain, True)
+
+
+def _export_listing(input_path, inputs, output_path, toolchain, include_diagnostics):
     from .replay import analyze_inputs
     if not isinstance(inputs, EventInputs):
         raise AppError('INVALID_INPUTS', '검증된 관측 입력이 필요합니다.')
@@ -196,13 +210,39 @@ def export_catalog(input_path, inputs, output_path, *, toolchain=None):
         analysis = analyze_inputs(source, inputs, tools)
         _video, _audio, timeline = inspect_source(source, tools, max_axis=1024)
         catalog = make_catalog(inputs, analysis, timeline)
+        diagnostics = None
+        if include_diagnostics:
+            from .diagnostics import _replay_diagnostics
+            diagnostics, candidates = _replay_diagnostics(inputs)
+            # Compare full candidates, not just a count. The extra pure replay
+            # never reads pixels or reuses potentially stale caller engine state.
+            resets = tuple((row.frame, item['source_reset_reason'])
+                for row,item in zip(inputs.rows, diagnostics['rows']) if item['source_reset_reason'] is not None)
+            if candidates != analysis.candidates or resets != analysis.lane_resets:
+                raise AppError('INVALID_DIAGNOSTICS', '원본 재생과 차선 진단 결과가 다릅니다.')
         with owned_output(output_path) as stage:
             write_bytes(stage/'inputs.json', inputs.to_bytes())
             write_bytes(stage/'catalog.json', catalog.to_bytes())
+            if diagnostics is not None:
+                from .diagnostics import diagnostics_bytes
+                write_bytes(stage/'lane-diagnostics.json', diagnostics_bytes(diagnostics))
             local_path(source)
             if before != _identity(source) or source_hash != _sha256(source):
                 raise AppError('INPUT_CHANGED', '목록 생성 중 원본 영상이 변경되었습니다.')
             release_pixels()
-        return catalog
+        return catalog, diagnostics
     except OSError:
         raise AppError('IO_ERROR', '원본 접근 권한과 목록 저장 공간을 확인하세요.') from None
+
+
+def listing_summary(catalog, diagnostics=None):
+    """Common legacy-compatible/redacted installed and source CLI output."""
+    result = catalog.report()
+    keys = ('candidate_index', 'direction', 'start', 'crossing', 'completion', 'signal_state', 'left', 'right')
+    summary = {'status': result['status'], 'candidate_count': result['candidate_count'],
+               'candidates': [{key: item[key] for key in keys} for item in result['candidates']],
+               'scope': 'recorded inputs; planned context; not automatic recognition'}
+    if diagnostics is not None:
+        from .diagnostics import diagnostics_summary
+        summary['lane_diagnostics'] = diagnostics_summary(diagnostics)
+    return summary

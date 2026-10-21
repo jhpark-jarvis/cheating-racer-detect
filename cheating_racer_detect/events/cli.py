@@ -10,6 +10,7 @@ def register(commands):
     events = commands.add_parser('events', help='기록된 실험 입력의 목록·재생·검증·평가')
     actions = events.add_subparsers(dest='event_command', required=True)
     listing = actions.add_parser('list', help='원본과 관측 입력을 검증해 후보 목록 저장')
+    listing.add_argument('--lane-diagnostics', action='store_true', help='차선 출처·unknown·단절 진단 함께 저장/표시')
     replay = actions.add_parser('replay', help='명시 선택 후보의 검토 묶음 생성')
     for parser in (listing, replay):
         parser.add_argument('--input', required=True, type=Path, help='원본 로컬 MP4')
@@ -69,12 +70,11 @@ def _run(args):
     inputs = load_inputs(args.inputs)
     tools = discover_tools(args.ffmpeg_dir) if args.ffmpeg_dir is not None else None
     if args.event_command == 'list':
-        from .catalog import export_catalog
-        result = export_catalog(args.input, inputs, args.output, toolchain=tools).report()
-        keys = ('candidate_index', 'direction', 'start', 'crossing', 'completion', 'signal_state', 'left', 'right')
-        return {'status': result['status'], 'candidate_count': result['candidate_count'],
-                'candidates': [{key: item[key] for key in keys} for item in result['candidates']],
-                'scope': 'recorded inputs; planned context; not automatic recognition'}
+        from .catalog import export_catalog, export_catalog_with_diagnostics, listing_summary
+        if args.lane_diagnostics:
+            catalog, diagnostics = export_catalog_with_diagnostics(args.input, inputs, args.output, toolchain=tools)
+            return listing_summary(catalog, diagnostics)
+        return listing_summary(export_catalog(args.input, inputs, args.output, toolchain=tools))
     from .replay import export_replay, export_replay_batch
     if args.candidate_indices is None:
         result = export_replay(args.input, inputs, args.output, candidate_index=args.candidate_index, toolchain=tools)
