@@ -45,10 +45,12 @@ def windows_api():
     api.WaitForSingleObject.restype = wintypes.DWORD
     api.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
     api.CloseHandle.argtypes = (wintypes.HANDLE,)
+    api.GetProcessTimes.argtypes = (wintypes.HANDLE, *([ctypes.POINTER(wintypes.FILETIME)] * 4))
+    api.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
     return api
 
 
-def children(api, parent_pid: int) -> list[tuple[int, str]]:
+def process_entries(api):
     snapshot = api.CreateToolhelp32Snapshot(2, 0)
     if snapshot == ctypes.c_void_p(-1).value:
         raise OSError(ctypes.get_last_error(), "Process enumeration unavailable")
@@ -62,16 +64,57 @@ def children(api, parent_pid: int) -> list[tuple[int, str]]:
             available = api.Process32NextW(snapshot, ctypes.byref(entry))
     finally:
         api.CloseHandle(snapshot)
-    # Windows venv python.exe may be a launcher, so FFmpeg can be a grandchild
-    # of Popen.pid. Establish ancestry from this one coherent OS snapshot.
-    owned = {parent_pid}
-    found = []
+    return entries
+
+
+def creation_time(api,handle):
+    times=[wintypes.FILETIME() for _ in range(4)]
+    if not api.GetProcessTimes(handle,*(ctypes.byref(t) for t in times)):
+        raise OSError(ctypes.get_last_error(),'Process identity unavailable')
+    return (times[0].dwHighDateTime<<32)|times[0].dwLowDateTime
+
+
+def process_image(api,handle):
+    size=wintypes.DWORD(32768)
+    value=ctypes.create_unicode_buffer(size.value)
+    if not api.QueryFullProcessImageNameW(handle,0,value,ctypes.byref(size)):
+        raise OSError(ctypes.get_last_error(),'Process image unavailable')
+    return Path(value.value).resolve()
+
+
+def observe_owned_children(api,parent,tracked,allowed_images):
+    """PID ancestry alone is unsafe: old orphans can name a reused parent PID.
+
+    Pin each validated process by handle; require a known executable AND a
+    creation time strictly after its validated immediate parent, including the
+    exact Popen root handle. Reject and close uncertain handles, never kill them.
+    """
+    entries=process_entries(api)
+    owned={parent.pid:creation_time(api,int(parent._handle))}
+    allowed={str(p.resolve()).casefold() for p in allowed_images}
+    names={p.name.casefold() for p in allowed_images}
     while True:
-        added = [(pid, name) for pid, parent, name in entries if parent in owned and pid not in owned]
-        if not added:
-            return found
-        found.extend(added)
-        owned.update(pid for pid, _ in added)
+        added=False
+        for pid,parent_pid,name in entries:
+            if parent_pid not in owned or pid in owned or name.casefold() not in names:
+                continue
+            existing=pid in tracked
+            handle=tracked[pid][0] if existing else api.OpenProcess(0x101001,False,pid)
+            if not handle: continue
+            accepted=False
+            try:
+                born=creation_time(api,handle)
+                image=process_image(api,handle)
+                if born<=owned[parent_pid] or str(image).casefold() not in allowed or image.name.casefold()!=name.casefold():
+                    continue
+                tracked[pid]=(handle,name)
+                owned[pid]=born
+                accepted=added=True
+            except OSError:
+                pass  # Identity not established; never add a cleanup target.
+            finally:
+                if not accepted and not existing: api.CloseHandle(handle)
+        if not added: return
 
 
 def require_children_exited(api, observed, phase):
@@ -98,13 +141,10 @@ def main() -> int:
     ]
     before = set(output.parent.glob(".crd-*.partial"))
 
+    allowed_images={Path(sys.executable),Path(sys._base_executable),
+                    Path(sys.base_prefix)/'python.exe',tools_dir/'ffmpeg.exe',tools_dir/'ffprobe.exe'}
     def observe_children(parent, tracked):
-        for pid, name in children(api, parent.pid):
-            if pid in tracked:
-                continue
-            handle = api.OpenProcess(0x100000 | 0x0001, False, pid)  # SYNCHRONIZE | TERMINATE
-            if handle:
-                tracked[pid] = (handle, name)
+        observe_owned_children(api,parent,tracked,allowed_images)
 
     try:
         process = subprocess.Popen(
