@@ -144,7 +144,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         source, inputs = generate_inputs(tools, fixture)
         original_hash = _sha256(source)
         # Keep legacy execution coverage, then exercise actual installed CLI
-        # with the new explicit synthetic v2 evidence (including offline audit).
+        # with explicit v2 then v3 evidence (including no-ML offline audit).
         save_inputs(inputs, fixture/'legacy')
         legacy_listing = child([executable, 'events', 'list', '--input', source,
             '--inputs', fixture/'legacy/inputs.json', '--output', fixture/'legacy-list',
@@ -152,6 +152,13 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         require(legacy_listing['candidate_count'] == 2)
         from .demo_lane_replay import with_lane_evidence
         inputs = with_lane_evidence(inputs)
+        save_inputs(inputs, fixture/'lane-recorded')
+        lane_listing = child([executable, 'events', 'list', '--input', source,
+            '--inputs', fixture/'lane-recorded/inputs.json', '--output', fixture/'lane-list',
+            '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
+        require(lane_listing['candidate_count'] == 2)
+        from .demo_lamp_replay import with_lamp_evidence
+        inputs = with_lamp_evidence(inputs)
         save_inputs(inputs, fixture/'recorded')
         record = fixture/'recorded/inputs.json'
         child([executable, 'clip', '--input', source, '--start', '0.35', '--end', '0.85',
@@ -165,7 +172,13 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         diagnostic = child([python, '-I', '-c',
             'import sys,json; from cheating_racer_detect.events.inputs import load_inputs; '
             'from cheating_racer_detect.events.diagnostics import load_lane_diagnostics; '
-            'r=load_lane_diagnostics(sys.argv[1],load_inputs(sys.argv[2])); '
+            'i=load_inputs(sys.argv[2]); '
+            'assert i.schema=="experimental-event-inputs-v3"; '
+            'from cheating_racer_detect.events.inputs import InputLampEngine; '
+            'e=InputLampEngine(i.lamp_config); row=i.rows[0]; '
+            'r=e.update_recorded(row,bytes(row.frame.width*row.frame.height*3)); '
+            'assert r["left"]==row.left and r["right"]==row.right; '
+            'r=load_lane_diagnostics(sys.argv[1],i); '
             'assert not any(n in sys.modules for n in ("numpy","cv2","torch")); '
             'print(json.dumps(r["counts"]))',fixture/'listed/lane-diagnostics.json',record],external,parsed=True)
         require(diagnostic['candidate_count'] == 2 and diagnostic['input_rows'] == 44)
@@ -221,6 +234,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'base_lane_section': True,
                   'base_lane_provenance': True,
                   'base_lane_diagnostics': True,
+                  'base_lamp_observations': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 
