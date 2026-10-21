@@ -122,7 +122,7 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 
 주 자동 ROI 경로는 **수동 확인 기준 → 차량 crop 기반 전용 부분 head**를 제안합니다. LISA는 위치 표현·가시성 설계 참고, 범용 모델 조합은 라벨 보조입니다. [DeepSignals](https://arxiv.org/abs/1905.01333)의 공간·시간 신호 추론과 [TLD](https://arxiv.org/abs/2409.02508)의 차량 crop·brake/turn 분류·시간 후처리는 **램프 부분 box 검출과 다른 역할**입니다. TLD의 2Hz 라벨이나 프레임 순서를 원본 PTS·완전 점멸 이력으로 대체하지 않습니다. 어떤 연구의 점수/시간 임계치도 이 프로젝트의 채택 기준이 아닙니다.
 
-연결안은 `현재 실제 Vehicle → crop 좌표 역변환 → 좌우/의미/가시성 검증 → LampROI → 원본 BGR·PTS → LampEngine`입니다. 현재 엔진은 box를 소비하므로 mask/corner→box의 배경 혼입도 평가해야 합니다. 미검출·범용 mask·추적 전파만으로 `usable`이나 `no_blink_observed`를 만들지 않으며, 구별할 근거가 없으면 `model_uncertain`/`unknown`으로 남깁니다. 학습된 신호 class를 밝기 값으로 바꿔 주입하지 않습니다. [램프 계약](cheating_racer_detect/events/lamp.py)
+구현된 외부 관측 연결은 `현재 실제 Vehicle → crop 좌표 역변환 → 명시적 좌우/의미/가시성 gate → LampROI → 원본 BGR·PTS → source-aware LampEngine`입니다. gate는 호출자의 선언이며 자동 인식 결과가 아닙니다. 현재 엔진은 box를 소비하므로 mask/corner→box의 배경 혼입도 평가해야 합니다. 미검출·범용 mask·추적 전파만으로 `usable`이나 `no_blink_observed`를 만들지 않으며, 구별할 근거가 없으면 `model_uncertain`/`unknown`으로 남깁니다. 학습된 신호 class를 밝기 값으로 바꿔 주입하지 않습니다. [관측 계약](cheating_racer_detect/events/lamp_observations.py), [밝기 엔진](cheating_racer_detect/events/lamp.py)
 
 GroundingDINO [코드](https://raw.githubusercontent.com/IDEA-Research/GroundingDINO/main/LICENSE)는 Apache-2.0이며 정확한 가중치·언어/backbone 자산 조건은 별도 확인 대상입니다. SAM 2는 [공식 안내](https://github.com/facebookresearch/sam2#license)에서 checkpoint의 Apache-2.0 적용을 명시하지만 데이터·전이 파일 조건은 구분해야 합니다. LISA/DeepSignals/TLD의 선택 코드·checkpoint·원본 데이터 권리는 확인되지 않은 부분이 남습니다. 다운로드·설치·추론은 이번 비교에서 수행하지 않았습니다.
 
@@ -229,10 +229,11 @@ candidate-001/
 
 실험용 JSON은 1 MiB·120개 입력 프레임으로 제한합니다. 중복/알 수 없는 필드·비정규 시간·비유한 수치를 거부하며, 전체 설정을 담은 canonical bytes의 해시로 실행 입력을 구분합니다. 해시는 위변조 인증이나 관측의 사실성을 보증하지 않습니다. 원본 영상은 별도로 보관해야 하며 다른 코드 버전의 동일 결과나 동일 MP4 바이트를 보장하지 않습니다.
 
-| 저장 형식 | 차선 근거·재생 정책 |
+| 저장 형식 | 관측 근거·재생 정책 |
 | --- | --- |
 | `experimental-event-inputs-v1` | 기존 주입 단면·설정의 canonical bytes/읽기/재생 호환 유지. 차선 모델·가시 구간·맥락 출처는 포함하지 않음 |
 | `experimental-event-inputs-v2` | 모든 행에 `LaneEvidence`: 네 slot의 좌표/누락/존재 mask·모델/적용 회전·외부 물리 ID/구간 가시성/맥락 선언. 동일 원본 Frame/차량에 연결하고 저장 단면을 재계산해 대조 |
+| `experimental-event-inputs-v3` | 모든 행에 `LampEvidence`: actual 차량/crop·모델 canvas/회전·차량 기준 좌우 part·visibility/turn 의미·맥락 선언. 저장 ROI를 재계산해 대조하며 `lane_provenance`로 기존 단면 또는 v2 차선 근거를 명시 |
 
 v2 재생과 원본 없는 batch 검사도 같은 source-aware 엔진을 사용합니다. 모델·회전·맥락/경계 연결 변경 또는 unknown에서 이력을 끊으며, reset marker를 임의로 주입하지 않습니다. `analyze_inputs(...).lane_resets`는 원본 `Frame`과 재계산된 차선 출처 단절 사유를 반환합니다. 원본 PTS·관측 단절 검사는 그대로 유지합니다.
 
@@ -247,6 +248,21 @@ row = InputFrame(frame, vehicle, section, left_roi, right_roi,
 ```
 
 `EventInputs`의 모든 행에 evidence를 지정하면 v2로 저장합니다. 관측 불능도 `LaneEvidence(None, None)`으로 명시하며, v1/v2 행 혼합·v2 출처 누락/null·단면 불일치는 거부합니다. [`capture_inputs`](cheating_racer_detect/events/capture.py)의 `lane_observations(frame, vehicle) → (LaneBatch | None, LaneContext | None)`도 v2를 생성합니다. 이때 기존 `gates` callback은 좌우 ROI와 `lane=None`을 반환해야 합니다. 단면과 출처를 이중 공급하지 않습니다.
+
+램프 출처는 `LampEvidence(LampObservation(...))`로 기록합니다. `LampObservation`은 동일 Frame/실제 차량 bbox 안의 crop에서 **명시적 CW 0/90/180/270° 회전 후 direct resize**한 모델 canvas 좌표를 받습니다. 네 corner를 coded 좌표로 역변환하며 padding/letterbox·자동 display 회전·강제 clipping·이미지 위치로 좌우 추정을 지원하지 않습니다. 차량 기준 좌우, 후면, identity, turn 의미가 확인되지 않으면 usable로 승격하지 않습니다. 작은 ROI 판정은 확대된 모델 좌표가 아닌 원본 whole pixels 기준입니다.
+
+```python
+from cheating_racer_detect.events import LampEvidence
+
+lamps = LampEvidence(observation)  # 동일 Frame의 외부 LampObservation; None은 명시적 unknown
+left, right = lamps.rois(frame, vehicle)
+row = InputFrame(frame, vehicle, section, left, right,
+                 lane_evidence=evidence, lamp_evidence=lamps)
+```
+
+모든 행에 `LampEvidence`를 넣으면 v3가 됩니다. `capture_inputs(..., lamp_observations=callback)`도 같은 형식을 생성하며 callback은 `(frame, vehicle) → LampObservation | None`입니다. 이때 기존 `gates`의 두 ROI는 `LampROI(None, 'model_uncertain')`이어야 합니다. 일부 행 누락/null·형식 혼합·출처와 ROI 불일치는 거부합니다. v1/v2의 저장 bytes와 기본 재생 정책은 유지합니다.
+
+v3는 모델/context·canvas/실제 전처리 회전·part ID 변경 또는 관측 없음에서 양쪽 램프 이력을 초기화합니다. 한쪽 가림은 해당 관측을 unknown으로 남겨 앞서 확인한 부분 점멸 사실을 보존합니다. `analyze_inputs(...).lamp_resets`는 원본 Frame과 단절 사유를 반환합니다. 과거 이력을 폐기한 뒤 그보다 앞선 후보의 신호 결과는 보수적으로 unknown이 될 수 있습니다. 원본 없는 batch 검사도 명백한 출처 단절을 넘은 sample 결합을 거부하지만 픽셀의 사실성을 증명하지는 않습니다. 자동 ROI/가시성/turn 인식 모델은 아직 연결하지 않았습니다.
 
 상세 좌표도 1 MiB 한도에 포함되므로 120행 전에 크기 제한에 도달할 수 있습니다. 출처 변경/삭제는 입력 해시를 바꾸어 기존 목록·묶음과의 연결을 무효화하지만, 전체 문서와 해시를 함께 재작성한 사람의 진위까지 인증하지는 않습니다. 외부 가시성·ID·의미 선언은 끝까지 **caller asserted / unverified**입니다. [저장 계약 시험](tests/test_lane_evidence.py), [실제 저장→목록→클립→재검사 시험](tests/test_lane_evidence_native.py)
 
@@ -416,6 +432,7 @@ python -m scripts.demo_events --output "D:\candidate-demo-001"
 python -m scripts.demo_replay --output "D:\replay-demo-001"
 python -m scripts.demo_batch_replay --output "D:\batch-demo-001"
 python -m scripts.demo_lane_replay --output "D:\lane-replay-demo-001"
+python -m scripts.demo_lamp_replay --output "D:\lamp-replay-demo-001"
 python -m scripts.benchmark_events --no-reuse
 python -m scripts.benchmark_events
 python -m scripts.benchmark_scaling --seconds 300 --window tail --no-reuse
@@ -433,7 +450,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\reco
 
 두 선택 옵션은 함께 사용할 수 없습니다. 후보 번호는 `analyze_inputs(source, inputs).candidates`의 순서입니다. 일괄 API의 `candidate_indices`는 중복 없는 정수 list/tuple(1~120개)이며, CLI도 같은 선택 규칙을 적용합니다. [일괄 합성 데모](scripts/demo_batch_replay.py)는 자체 44프레임 영상의 우측→좌측 변경과 좌우 점멸을 주입해 저장/읽기/재생/두 클립을 연결합니다. 차량 탐지 모델의 결과나 실제 사건 정답이 아닙니다.
 
-[차선 출처 데모](scripts/demo_lane_replay.py)는 같은 합성 시나리오에 명시적 곡선/물리 ID/가시성·맥락을 주입해 v2 저장→목록→역순 두 후보 클립을 연결합니다. 자동 차선 모델의 결과가 아니며, `crd events`의 기존 list/replay/verify 명령은 v1과 v2를 모두 읽습니다.
+[차선 출처 데모](scripts/demo_lane_replay.py)는 같은 합성 시나리오에 명시적 곡선/물리 ID/가시성·맥락을 주입합니다. [램프 출처 데모](scripts/demo_lamp_replay.py)는 자체 영상의 알려진 램프 부분/crop·좌우/의미 선언을 더해 v3 저장→목록→역순 두 후보 클립을 연결합니다. 둘 다 자동 모델의 결과가 아니며, `crd events`의 기존 list/replay/verify 명령은 v1/v2/v3를 읽습니다.
 
 먼저 [목록 명령](scripts/list_events.py)으로 번호·방향·시간·점멸/unknown 사유를 확인하고, 원하는 번호만 선택할 수 있습니다. `--catalog`는 `--candidate-indices`와 함께 사용합니다.
 
@@ -486,7 +503,7 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 474개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/출처 저장·목록 진단·시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 505개 PASS | CLI·설치/패키지·차선/램프 관측 출처·좌표/단면·목록 진단·시각·추적·검토·사건 재생·저장 검사·평가·자원/종료 소유권·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
 | 차선 출처 저장·재생 | v1 호환·v2 roundtrip·44프레임 두 후보/맥락 변경·실제 capture/CLI | 좌표/mask/맥락 해시 연결·단면 재계산·source reset 재현·원본 유/무 readonly batch 검사·출처 누락/목록 drift 거부·실패/취소/정리 |
