@@ -315,6 +315,12 @@ replay-batch-001/
 
 `export_replay_batch(..., catalog=load_catalog("catalog.json"))`는 원본·입력 해시를 먼저 확인하고 **새 재생의 전체 목록**을 다시 대조합니다. 순서·시각·신호·후보 내용이 달라지면 영상 생성 전에 `CATALOG_CHANGED`로 중단합니다. 일치하면 canonical 목록과 해시를 검토 묶음에 함께 저장합니다. 해시는 인증·서명이 아니고 목록은 분석 캐시가 아닙니다. 목록과 내보내기는 별도 작업이며 각각 원본을 분석합니다. 기존 단일/목록 없는 일괄 호출은 유지됩니다. [목록 계약 시험](tests/test_candidate_catalog.py), [실제 목록→선택→클립 검증](tests/test_candidate_catalog_native.py)
 
+선택 `--lane-diagnostics`는 후보가 0개여도 **차선 출처·관측 불능·이력 단절 타임라인**을 표시하고 `lane-diagnostics.json`을 입력/목록과 함께 저장합니다. 기본 출력과 catalog-v1 형식은 그대로이며, 이 옵션도 원본을 검증·분석합니다. [진단 API](cheating_racer_detect/events/diagnostics.py), [계약 시험](tests/test_lane_diagnostics.py), [실제 연결 시험](tests/test_lane_diagnostics_native.py)
+
+진단은 원본 정수 PTS·정규화 시각, 단면의 unknown/부분 근거, 사건 엔진 상태와 차선 출처 reset을 구분합니다. v1의 `not_recorded`는 새 provenance 미기록이지 가시성 확인이 아닙니다. `source_resets`는 unknown의 반복 reset도 행마다 포함합니다. 행 개수·사유별 집계는 주어진 입력에 대한 설명이며 실제 주행 coverage나 미발생 증명이 아닙니다. stdout은 경로/해시·차량/모델/맥락/물리 경계 ID를 제외하며 상세 출처는 로컬 파일에 있습니다.
+
+라이브러리는 `export_catalog_with_diagnostics(...) → (catalog, report)`와 읽기 전용 `load_lane_diagnostics(path, inputs)`를 제공합니다. reader는 최대 1 MiB JSON을 동일 입력의 새 진단과 대조하지만 원본 픽셀·선언의 진위를 인증하지 않습니다. 진단은 분석 캐시나 batch 검증 대상이 아니며, 명시 선택/재생은 기존 원본·입력·목록 검사를 그대로 수행합니다.
+
 ### 3.12 Read-only saved-bundle verification
 
 [`verify_batch`](cheating_racer_detect/events/verify.py)는 저장 batch의 고정 상대 참조·입력/목록/후보 해시·관측 기록·원본↔파생 PTS를 재검사합니다. 검토 MP4의 저장 byte hash, 실제 프레임·마지막 duration, 원본 클립의 회전/크기·AAC 시각을 확인하고 두 영상을 완전 디코딩합니다. 기존 파일을 수정하지 않아 폴더 이동 후에도 사용할 수 있습니다.
@@ -362,6 +368,7 @@ Python 3.13의 별도 환경에서 소스를 설치하면 소스 폴더 밖에�
 python -m pip install .
 crd doctor --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-001" --ffmpeg-dir "D:\tools\ffmpeg\bin"
+crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-diagnostics-001" --lane-diagnostics --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events verify --bundle "D:\review-batch" --input "D:\dashcam\input.mp4" --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events evaluate --labels "D:\evaluation\labels.json"
 ```
@@ -437,6 +444,8 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\cata
 
 목록 stdout은 후보 요약이고 원본 경로·해시는 출력하지 않습니다. 해시/출처는 로컬 receipt에 있습니다. 합성 일괄 데모도 목록 저장→읽기→명시 선택→새 재생 대조를 거칩니다. 변경된 목록/입력은 다시 목록을 생성해 검토하고 선택하세요. 자동 필터나 모든 후보 자동 내보내기는 없습니다.
 
+소스 명령 `python -m scripts.list_events`도 `--lane-diagnostics`를 지원합니다. 미사용 시 기존 두 파일, 사용 시 진단을 포함한 세 파일을 함께 확정하며 실패·취소에는 부분 결과를 게시하지 않습니다.
+
 아래 소스 명령의 검토 묶음 검사는 새 출력 폴더를 만들지 않습니다. 성공 0, 오류 1, 취소 130을 반환하며 stdout은 경로 없는 요약입니다. 원본 재생 대조에도 NumPy/OpenCV는 필요하지 않고 FFmpeg가 필요합니다.
 
 ```powershell
@@ -477,10 +486,11 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 452개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/출처 저장·시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
+| 공개 테스트 | 474개 PASS | CLI·설치/패키지 구성·차선 좌표/단면/출처 저장·목록 진단·시각·추적·검토·사건 재생/목록·저장 검사·평가·원본/구간 자원·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
 | 차선 출처 저장·재생 | v1 호환·v2 roundtrip·44프레임 두 후보/맥락 변경·실제 capture/CLI | 좌표/mask/맥락 해시 연결·단면 재계산·source reset 재현·원본 유/무 readonly batch 검사·출처 누락/목록 drift 거부·실패/취소/정리 |
+| 차선 목록 진단 | v1 미기록/v2 출처·0후보 unknown·맥락 변경·실제 CLI | 원본 시각의 단면/사건 상태·출처 단절 분리·입력 결합 readonly reader·기본 목록/선택 유지·원자적 확정/복구 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
