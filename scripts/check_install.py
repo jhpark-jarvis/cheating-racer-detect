@@ -157,8 +157,18 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         child([executable, 'clip', '--input', source, '--start', '0.35', '--end', '0.85',
                '--output', fixture/'clip', '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
         listing = child([executable, 'events', 'list', '--input', source, '--inputs', record,
-                         '--output', fixture/'listed', '--ffmpeg-dir', tools.ffmpeg.parent], external, parsed=True)
+                         '--output', fixture/'listed', '--ffmpeg-dir', tools.ffmpeg.parent,
+                         '--lane-diagnostics'], external, parsed=True)
         require(listing['candidate_count'] == 2)
+        require(listing['lane_diagnostics']['counts']['section_ready_rows'] == 44 and
+                listing['lane_diagnostics']['counts']['source_resets'] == 0)
+        diagnostic = child([python, '-I', '-c',
+            'import sys,json; from cheating_racer_detect.events.inputs import load_inputs; '
+            'from cheating_racer_detect.events.diagnostics import load_lane_diagnostics; '
+            'r=load_lane_diagnostics(sys.argv[1],load_inputs(sys.argv[2])); '
+            'assert not any(n in sys.modules for n in ("numpy","cv2","torch")); '
+            'print(json.dumps(r["counts"]))',fixture/'listed/lane-diagnostics.json',record],external,parsed=True)
+        require(diagnostic['candidate_count'] == 2 and diagnostic['input_rows'] == 44)
         labels = fixture/'labels.json'
         labels.write_text(json.dumps(definition()), encoding='utf-8')
         assessment = child([executable, 'events', 'evaluate', '--labels', labels], external, parsed=True)
@@ -210,6 +220,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'base_lane_contract': True,
                   'base_lane_section': True,
                   'base_lane_provenance': True,
+                  'base_lane_diagnostics': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 
