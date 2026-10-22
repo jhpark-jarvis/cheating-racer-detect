@@ -56,5 +56,54 @@ class Ownership(unittest.TestCase):
         self.assertEqual(tracked,{})
         api.CloseHandle.assert_called_with(200)
 
+    def test_unavailable_image_is_closed_without_becoming_cleanup_target(self):
+        api=Mock()
+        api.OpenProcess.return_value=200
+        tracked={}
+        with patch('tests.cancel_driver.process_entries',return_value=[(200,100,'python.exe')]),\
+             patch('tests.cancel_driver.creation_time',side_effect=[100,110]),\
+             patch('tests.cancel_driver.process_image',side_effect=OSError('denied')):
+            observe_owned_children(api,SimpleNamespace(pid=100,_handle=1),tracked,{Path('/owned/python.exe')})
+        self.assertEqual(tracked,{})
+        api.CloseHandle.assert_called_once_with(200)
+        api.TerminateProcess.assert_not_called()
+
+    def test_missing_root_identity_never_opens_any_child(self):
+        api=Mock()
+        with patch('tests.cancel_driver.process_entries',return_value=[(200,100,'python.exe')]),\
+             patch('tests.cancel_driver.creation_time',side_effect=OSError('root denied')),self.assertRaises(OSError):
+            observe_owned_children(api,SimpleNamespace(pid=100,_handle=1),{},{Path('/owned/python.exe')})
+        api.OpenProcess.assert_not_called()
+        api.TerminateProcess.assert_not_called()
+
+    def test_broken_or_cyclic_ancestry_never_promoted(self):
+        api,tracked=self.run_observer([(200,300,'python.exe'),(300,200,'ffmpeg.exe')],{1:100},{})
+        self.assertEqual(tracked,{})
+        api.OpenProcess.assert_not_called()
+
+    def test_denied_handle_not_owned_and_never_closed_or_terminated(self):
+        api=Mock()
+        api.OpenProcess.return_value=0
+        tracked={}
+        with patch('tests.cancel_driver.process_entries',return_value=[(200,100,'python.exe')]),\
+             patch('tests.cancel_driver.creation_time',return_value=100):
+            observe_owned_children(api,SimpleNamespace(pid=100,_handle=1),tracked,{Path('/owned/python.exe')})
+        self.assertEqual(tracked,{})
+        api.CloseHandle.assert_not_called()
+        api.TerminateProcess.assert_not_called()
+
+    def test_pinned_handle_reused_without_reopening_pid(self):
+        api=Mock()
+        tracked={200:(7,'python.exe')}
+        allowed={Path('/owned/python.exe').resolve()}
+        with patch('tests.cancel_driver.process_entries',return_value=[(200,100,'python.exe')]),\
+             patch('tests.cancel_driver.creation_time',side_effect=[100,110]),\
+             patch('tests.cancel_driver.process_image',return_value=next(iter(allowed))):
+            observe_owned_children(api,SimpleNamespace(pid=100,_handle=1),tracked,allowed)
+        self.assertEqual(tracked,{200:(7,'python.exe')})
+        api.OpenProcess.assert_not_called()
+        api.CloseHandle.assert_not_called()
+        api.TerminateProcess.assert_not_called()
+
 
 if __name__=='__main__': unittest.main()

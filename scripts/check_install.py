@@ -178,6 +178,13 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
             'e=InputLampEngine(i.lamp_config); row=i.rows[0]; '
             'r=e.update_recorded(row,bytes(row.frame.width*row.frame.height*3)); '
             'assert r["left"]==row.left and r["right"]==row.right; '
+            'from cheating_racer_detect.events import LampPart,LampObservation; '
+            'from cheating_racer_detect.tracking import Box; '
+            'q=Box(37,32,39,34); '
+            'o=LampObservation(row.frame,row.vehicle.identity,Box(2,2,94,62),"precision-fixture","crop-fixture",'
+            'Box(2,2,76,56),74,54,180,LampPart("left","left",q,"visible",True),'
+            'LampPart("right","right",q,"visible",True),True,True,True); '
+            'assert o.coded_box(o.left)==Box(37,22,39,24); '
             'r=load_lane_diagnostics(sys.argv[1],i); '
             'assert not any(n in sys.modules for n in ("numpy","cv2","torch")); '
             'print(json.dumps(r["counts"]))',fixture/'listed/lane-diagnostics.json',record],external,parsed=True)
@@ -235,6 +242,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'base_lane_provenance': True,
                   'base_lane_diagnostics': True,
                   'base_lamp_observations': True,
+                  'base_lamp_precision': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 
