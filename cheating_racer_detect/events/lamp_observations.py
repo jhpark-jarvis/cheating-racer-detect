@@ -5,6 +5,7 @@ padding inference, image-side -> vehicle-side guess, clipping or pixel synthesis
 """
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 from ..analysis.contracts import model_identifier
 from ..tracking import Box, Frame
@@ -80,17 +81,21 @@ class LampObservation:
             raise ValueError('Expected this observation\'s part')
         if part.box is None:
             return None
-        c,b,r=self.crop,part.box,self.rotation_cw
-        w,h=c.x2-c.x1,c.y2-c.y1
+        b,r=part.box,self.rotation_cw
+        # Preserve the exact supplied binary values until the final coordinate.
+        # Float divide/multiply can turn an integer edge into n+1ulp, changing
+        # ceil/floor whole-pixel membership. No epsilon, snapping or clipping.
+        cx1,cy1,cx2,cy2=(Fraction(v) for v in self.crop.values())
+        w,h=cx2-cx1,cy2-cy1
         vw,vh=(h,w) if r in (90,270) else (w,h)
         points=[]
         for x,y in ((b.x1,b.y1),(b.x1,b.y2),(b.x2,b.y1),(b.x2,b.y2)):
-            u,v=x/self.model_width*vw,y/self.model_height*vh
+            u,v=Fraction(x)/self.model_width*vw,Fraction(y)/self.model_height*vh
             px,py = ((v,h-u) if r==90 else (w-u,h-v) if r==180 else
                      (w-v,u) if r==270 else (u,v))
-            points.append((c.x1+px,c.y1+py))
-        return Box(min(p[0] for p in points),min(p[1] for p in points),
-                   max(p[0] for p in points),max(p[1] for p in points))
+            points.append((cx1+px,cy1+py))
+        return Box(float(min(p[0] for p in points)),float(min(p[1] for p in points)),
+                   float(max(p[0] for p in points)),float(max(p[1] for p in points)))
 
 
 def resolve_lamp_rois(frame,vehicle,observation):
