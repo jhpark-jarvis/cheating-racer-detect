@@ -251,6 +251,8 @@ row = InputFrame(frame, vehicle, section, left_roi, right_roi,
 
 램프 출처는 `LampEvidence(LampObservation(...))`로 기록합니다. `LampObservation`은 동일 Frame/실제 차량 bbox 안의 crop에서 **명시적 CW 0/90/180/270° 회전 후 direct resize**한 모델 canvas 좌표를 받습니다. 네 corner를 coded 좌표로 역변환하며 padding/letterbox·자동 display 회전·강제 clipping·이미지 위치로 좌우 추정을 지원하지 않습니다. 차량 기준 좌우, 후면, identity, turn 의미가 확인되지 않으면 usable로 승격하지 않습니다. 작은 ROI 판정은 확대된 모델 좌표가 아닌 원본 whole pixels 기준입니다.
 
+좌표 역변환은 공급된 수치의 정확한 비율로 계산한 뒤 최종 좌표에서만 float로 변환합니다. 중간 반올림으로 정수 픽셀 경계가 밀리지 않게 하되, 실제 subpixel 경계는 정수로 맞추거나 영역을 확대하지 않습니다. 과거 v3의 저장 ROI가 재계산 값과 다르면 입력을 다시 생성해야 하며 불일치를 자동 보정하지 않습니다. [독립 좌표·가시성 불변식](tests/test_lamp_invariants.py), [실제 원본 밝기·클립 대조](tests/test_lamp_precision_native.py)
+
 ```python
 from cheating_racer_detect.events import LampEvidence
 
@@ -503,11 +505,12 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 505개 PASS | CLI·설치/패키지·차선/램프 관측 출처·좌표/단면·목록 진단·시각·추적·검토·사건 재생·저장 검사·평가·자원/종료 소유권·그림 출처 |
+| 공개 테스트 | 524개 PASS | CLI·설치/패키지·차선/램프 관측 출처·좌표/단면·목록 진단·시각·추적·검토·사건 재생·저장 검사·평가·자원/종료 소유권·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
 | 차선 출처 저장·재생 | v1 호환·v2 roundtrip·44프레임 두 후보/맥락 변경·실제 capture/CLI | 좌표/mask/맥락 해시 연결·단면 재계산·source reset 재현·원본 유/무 readonly batch 검사·출처 누락/목록 drift 거부·실패/취소/정리 |
 | 차선 목록 진단 | v1 미기록/v2 출처·0후보 unknown·맥락 변경·실제 CLI | 원본 시각의 단면/사건 상태·출처 단절 분리·입력 결합 readonly reader·기본 목록/선택 유지·원자적 확정/복구 |
+| 램프 출처·수치 경계 | v3 저장·네 회전/리사이즈·정수/subpixel 독립 oracle·실제 MP4 | 원본 whole-pixel 밝기 보존·좌우/의미/가시성 unknown·출처 단절·변조 거부·역순 클립/readonly 검사. 자동 ROI 인식·실차 정확도 아님 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
 | 일괄 재생 | 자체 44프레임·우측/좌측 두 후보·역순/부분 선택·실제 CLI | 분석1회·원본 검사1회·후보별 완전 decode/파생 검사 유지·PTS/해시 연결·unknown·중간 실패/취소/전체 재시도 |
