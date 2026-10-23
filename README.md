@@ -120,13 +120,28 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 | [LISA context-based corner CNN](https://arxiv.org/abs/2307.14571v2) | vehicle box와 **이미 찾은 lamp center**에서 4개 corner 회귀; 위치 보정 참고 | 중심 검출·turn 의미는 별도. 확인한 [원저자 페이지](https://cvrr.ucsd.edu/vehicle-lights-dataset/)만으로 실행 가능한 코드/가중치·Windows 조건은 확정 못 함 |
 | [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) + [SAM 2.1](https://github.com/facebookresearch/sam2) | text→box·prompt→mask; 라벨 초안 보조 후보 | 범용 checkpoint이지 램프 전용 모델이 아님. 작은/꺼진 램프·좌우·신호 의미 미보장; CUDA·언어모델 자산·SAM의 WSL 권고 검토 필요 |
 
-주 자동 ROI 경로는 **수동 확인 기준 → 차량 crop 기반 전용 부분 head**를 제안합니다. LISA는 위치 표현·가시성 설계 참고, 범용 모델 조합은 라벨 보조입니다. [DeepSignals](https://arxiv.org/abs/1905.01333)의 공간·시간 신호 추론과 [TLD](https://arxiv.org/abs/2409.02508)의 차량 crop·brake/turn 분류·시간 후처리는 **램프 부분 box 검출과 다른 역할**입니다. TLD의 2Hz 라벨이나 프레임 순서를 원본 PTS·완전 점멸 이력으로 대체하지 않습니다. 어떤 연구의 점수/시간 임계치도 이 프로젝트의 채택 기준이 아닙니다.
+주 자동 ROI 경로는 **수동 확인 기준 → 차량 crop 기반 전용 부분 head**를 제안합니다. LISA는 위치 표현·가시성 설계 참고, 범용 모델 조합은 라벨 보조입니다. [DeepSignals](https://arxiv.org/abs/1905.01333)의 공간·시간 신호 추론과 [TLD](https://arxiv.org/abs/2409.02508)의 차량 crop·brake/turn 분류·시간 후처리는 **램프 부분 box 검출과 다른 역할**입니다. 희소 라벨이나 프레임 순서를 원본 PTS·완전 점멸 이력으로 대체하지 않습니다. 어떤 연구의 점수/시간 임계치도 이 프로젝트의 채택 기준이 아닙니다.
 
 구현된 외부 관측 연결은 `현재 실제 Vehicle → crop 좌표 역변환 → 명시적 좌우/의미/가시성 gate → LampROI → 원본 BGR·PTS → source-aware LampEngine`입니다. gate는 호출자의 선언이며 자동 인식 결과가 아닙니다. 현재 엔진은 box를 소비하므로 mask/corner→box의 배경 혼입도 평가해야 합니다. 미검출·범용 mask·추적 전파만으로 `usable`이나 `no_blink_observed`를 만들지 않으며, 구별할 근거가 없으면 `model_uncertain`/`unknown`으로 남깁니다. 학습된 신호 class를 밝기 값으로 바꿔 주입하지 않습니다. [관측 계약](cheating_racer_detect/events/lamp_observations.py), [밝기 엔진](cheating_racer_detect/events/lamp.py)
 
 GroundingDINO [코드](https://raw.githubusercontent.com/IDEA-Research/GroundingDINO/main/LICENSE)는 Apache-2.0이며 정확한 가중치·언어/backbone 자산 조건은 별도 확인 대상입니다. SAM 2는 [공식 안내](https://github.com/facebookresearch/sam2#license)에서 checkpoint의 Apache-2.0 적용을 명시하지만 데이터·전이 파일 조건은 구분해야 합니다. LISA/DeepSignals/TLD의 선택 코드·checkpoint·원본 데이터 권리는 확인되지 않은 부분이 남습니다. 다운로드·설치·추론은 이번 비교에서 수행하지 않았습니다.
 
 평가는 같은 세션 분리 자료에서 detector/tracker를 고정하고 lane 또는 ROI 하나씩 바꿉니다. 위치/좌우/가시성의 분리 평가와 사건·신호 종단 간 평가를 구분하고, 미탐 포함 recall·unknown/coverage·위험한 미점멸 확정·원본 읽기/모델 로드를 포함한 시간·RAM/VRAM을 함께 비교할 계획입니다. 실영상·정량 기준·모델별 Windows/회전 의미 검증과 최종 선택은 아직 남아 있습니다.
+
+### 2.3 Research-to-evaluation mapping
+
+위치·가시성, 프레임/시퀀스의 신호 상태, 차선 변경 구간의 관측 근거는 서로 다른 평가 대상입니다. 다음은 문헌과 공개 metadata를 현재 입력 계약에 대조한 **후속 실험 제안**이며 모델 실행 결과가 아닙니다.
+
+| 연구·자료 | 실제 감독 신호·출력 | 이 프로젝트에서의 역할·공백 |
+| --- | --- | --- |
+| [LISA 표현·visibility](https://arxiv.org/pdf/2307.14521) | 중심 기반 crop·corner/가시성; padding 포함 전처리 | 위치/관측 가능성 평가 참고. 현재 no-pad `LampObservation`에 그대로 연결 불가; turn 부분 의미는 별도 |
+| [TLD-YT · 논문 §IV-A](https://arxiv.org/html/2409.02508v1) | 차량 bbox, 분리된 brake/turn 라벨·2Hz | 차량 crop 상태 분류 비교용. lamp 부분 위치 정답이 아니며 희소 라벨은 점멸 phase 정답이 아님 |
+| [TLD-LOKI · 같은 논문](https://arxiv.org/html/2409.02508v1) | 본문상 5Hz·off/brake/left/right | YT와 별도 taxonomy로 평가. 부재한 both/unknown을 off로 만들거나 같은 enum으로 병합하지 않음 |
+| [DeepSignals · §III](https://arxiv.org/pdf/1905.01333) | attention·CNN·ConvLSTM의 신호/자세 추론 | 학습 temporal 비교 경로. 논리적 신호 사용과 순간 발광은 다르며 `OFF`를 설정 창의 `no_blink_observed`로 치환하지 않음 |
+
+TLD의 [공식 카드](https://huggingface.co/datasets/ChaiJohn/TLD/blob/main/README.md)는 2Hz로 요약하지만 논문은 subset별 주석 밀도를 구분합니다. 실제 배포 파일의 라벨·시각은 별도 확인해야 합니다. [공식 파일 목록](https://huggingface.co/datasets/ChaiJohn/TLD/tree/main)은 확인 시점(2026-10-23)에 gated 상태였으며 공개 목록·논문 인용이 파일 접근이나 사용·재배포 권한을 뜻하지 않습니다. 자료·가중치는 내려받지 않았습니다.
+
+제안 실험은 소스/세션·차량 군을 분리해 인접 프레임 누출을 막고, 고정 detector/tracker의 실제 crop과 GT crop 조건부 결과를 구분합니다. 위치/side/visibility 오류, 상태별 precision·recall·macro-F1, 미탐을 포함한 사건 recall과 unknown/coverage를 층별로 보고합니다. pseudo-label·보간으로 관측 공백을 숨기지 않으며, 자료 권한·실제 annotation 확인과 GT·수락 임계치 합의 뒤 실행합니다. 현재 밝기 엔진의 정책·성능 수치를 문헌 결과로 대체하지 않습니다.
 
 ## 3. Method
 
