@@ -143,6 +143,20 @@ TLD의 [공식 카드](https://huggingface.co/datasets/ChaiJohn/TLD/blob/main/RE
 
 제안 실험은 소스/세션·차량 군을 분리해 인접 프레임 누출을 막고, 고정 detector/tracker의 실제 crop과 GT crop 조건부 결과를 구분합니다. 위치/side/visibility 오류, 상태별 precision·recall·macro-F1, 미탐을 포함한 사건 recall과 unknown/coverage를 층별로 보고합니다. pseudo-label·보간으로 관측 공백을 숨기지 않으며, 자료 권한·실제 annotation 확인과 GT·수락 임계치 합의 뒤 실행합니다. 현재 밝기 엔진의 정책·성능 수치를 문헌 결과로 대체하지 않습니다.
 
+### 2.4 Dataset-to-evaluation readiness
+
+공개 데이터의 task별 정답과 이 프로젝트의 **변경 전후 관측 정답**은 구분해야 합니다. 다음은 공식 문서 기반 활용 검토이며 데이터 확보·어댑터 구현·실영상 성능 검증 결과가 아닙니다.
+
+| 자료 | 확인한 주석·시간 구조 | 가능한 보조 평가 / 남는 공백 |
+| --- | --- | --- |
+| [LOKI](https://usa.honda-ri.com/loki) | camera 30Hz·주석 5FPS, track/bbox·의도/상황 정보 | 궤적·상황 분석 참고. 의도 라벨은 좌우 램프의 발광/미점멸 정답이 아니며 원본 LOKI와 TLD-LOKI를 같은 라벨로 취급하지 않음 |
+| [BDD100K · images](https://github.com/bdd100k/bdd100k/blob/9ac17c6c7c51d2fc83065fccd707cd5b1882a293/doc/source/download.rst) | 차선 등에 쓰는 영상 10초 시점 이미지 | 공간 위치 비교용. 단일 차선 주석으로 연속 변경 사건·물리 경계 ID를 검증하지 않음 |
+| [BDD100K · MOT2020](https://github.com/bdd100k/bdd100k/blob/9ac17c6c7c51d2fc83065fccd707cd5b1882a293/doc/source/download.rst) | 30→5Hz 추적 자료, object ID는 video 내부 범위 | 차량 연결 비교용. 다른 video의 같은 숫자 ID는 별개이며 희소 주석은 완전한 램프 관측 이력이 아님 |
+
+연결 전에는 **시간·좌표·ID·관측 의미**를 검증합니다. [BDD 좌표 문서](https://github.com/bdd100k/bdd100k/blob/9ac17c6c7c51d2fc83065fccd707cd5b1882a293/doc/source/format.rst)는 변환 폭을 `x2-x1+1`로 설명하므로 현재 half-open `xyxy`에 그대로 주입하지 않습니다. release/export의 실제 좌표 의미를 확인하고, 모든 box에 무조건 `+1`하는 보정도 피합니다. 차량의 `occluded` 속성은 램프 가시성 정답이 아니며 `trafficLightColor`는 차량 방향지시등 라벨이 아닙니다. annotation index로 원본 PTS를 만들거나 누락 점멸을 보간하지 않습니다.
+
+접근 조건도 별도입니다. LOKI 공식 페이지는 비상업·대학 소속/대학 이메일 요청을 안내하고, [BDD 조건](https://github.com/bdd100k/bdd100k/blob/9ac17c6c7c51d2fc83065fccd707cd5b1882a293/doc/source/license.rst)은 코드 BSD-3-Clause와 데이터·라벨의 이용 조건을 구분합니다. 이는 사용·공개 가능성 확정이 아니며 자료는 내려받지 않았습니다. 종단 간 평가는 권한이 확인된 연속 영상에 같은 차량·가시 경계·좌우 램프·원본 시각을 함께 라벨링하는 방향을 제안합니다. task별 공간/추적 점수를 제품 사건 정확도로 합성하지 않습니다.
+
 ## 3. Method
 
 ### 3.1 Source time and coordinates
