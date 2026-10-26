@@ -368,6 +368,12 @@ replay-batch-001/
 
 라이브러리는 `export_catalog_with_diagnostics(...) → (catalog, report)`와 읽기 전용 `load_lane_diagnostics(path, inputs)`를 제공합니다. reader는 최대 1 MiB JSON을 동일 입력의 새 진단과 대조하지만 원본 픽셀·선언의 진위를 인증하지 않습니다. 진단은 분석 캐시나 batch 검증 대상이 아니며, 명시 선택/재생은 기존 원본·입력·목록 검사를 그대로 수행합니다.
 
+선택 `--lamp-diagnostics`는 좌우 coded ROI·원본 whole-pixel 면적과 기하 상태, 외부 가시성/의미 선언, 입력 프레임 공백·모델/맥락/part 변경을 `lamp-diagnostics.json`에 기록합니다. 후보가 없어도 모든 입력 행을 유지하며, v1/v2의 출처 `not_recorded`와 v3의 명시적 관측 `unknown`을 구분합니다. `usable` 기하 상태는 선언과 면적 조건일 뿐 실제 가시성·신호 사용을 인증하지 않습니다. 밝기를 합성/재계산하거나 점멸 상태를 만들지 않고, 후보의 기존 신호 요약은 원본 픽셀 분석 결과를 유지합니다.
+
+`history_break_reasons`는 입력에서 확인한 단절 조건이며 밝기 엔진의 누적 `history_start_reason`과 다릅니다. 출처 reset은 새 원본 재생의 `lamp_resets`와 대조하고, 누락 행·시간을 보간하지 않습니다. source reset과 단순 기하/가시성 문제도 구분합니다. 두 진단 옵션을 함께 켜면 입력·목록·차선/램프 진단 네 파일을 전부 확정하거나 전부 취소합니다. stdout에는 상세 좌표·해시·차량/모델/맥락/part ID를 출력하지 않습니다.
+
+API는 `export_catalog_with_lamp_diagnostics(..., include_lane_diagnostics=False) → (catalog, lamp_report, lane_report_or_none)`, 순수 `lamp_diagnostics(inputs)`와 입력 결합 읽기 전용 `load_lamp_diagnostics(path, inputs)`입니다. 최대 1 MiB 파일을 새 입력 계산과 엄격히 대조하며 reader 성공은 원본 픽셀·전체 관측 coverage·선언의 진위 증명이 아닙니다. [램프 진단 API](cheating_racer_detect/events/lamp_diagnostics.py), [계약 시험](tests/test_lamp_diagnostics.py), [실제 합성 원본·CLI 연결 시험](tests/test_lamp_diagnostics_native.py)
+
 ### 3.12 Read-only saved-bundle verification
 
 [`verify_batch`](cheating_racer_detect/events/verify.py)는 저장 batch의 고정 상대 참조·입력/목록/후보 해시·관측 기록·원본↔파생 PTS를 재검사합니다. 검토 MP4의 저장 byte hash, 실제 프레임·마지막 duration, 원본 클립의 회전/크기·AAC 시각을 확인하고 두 영상을 완전 디코딩합니다. 기존 파일을 수정하지 않아 폴더 이동 후에도 사용할 수 있습니다.
@@ -416,6 +422,7 @@ python -m pip install .
 crd doctor --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-001" --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-diagnostics-001" --lane-diagnostics --ffmpeg-dir "D:\tools\ffmpeg\bin"
+crd events list --input "D:\dashcam\input.mp4" --inputs "D:\recording\inputs.json" --output "D:\catalog-lamp-001" --lamp-diagnostics --lane-diagnostics --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events verify --bundle "D:\review-batch" --input "D:\dashcam\input.mp4" --ffmpeg-dir "D:\tools\ffmpeg\bin"
 crd events evaluate --labels "D:\evaluation\labels.json"
 ```
@@ -492,7 +499,7 @@ python -m scripts.replay_events --input "D:\dashcam\input.mp4" --inputs "D:\cata
 
 목록 stdout은 후보 요약이고 원본 경로·해시는 출력하지 않습니다. 해시/출처는 로컬 receipt에 있습니다. 합성 일괄 데모도 목록 저장→읽기→명시 선택→새 재생 대조를 거칩니다. 변경된 목록/입력은 다시 목록을 생성해 검토하고 선택하세요. 자동 필터나 모든 후보 자동 내보내기는 없습니다.
 
-소스 명령 `python -m scripts.list_events`도 `--lane-diagnostics`를 지원합니다. 미사용 시 기존 두 파일, 사용 시 진단을 포함한 세 파일을 함께 확정하며 실패·취소에는 부분 결과를 게시하지 않습니다.
+소스 명령 `python -m scripts.list_events`도 `--lane-diagnostics`와 `--lamp-diagnostics`를 지원합니다. 미사용 시 기존 두 파일, 하나만 사용 시 세 파일, 함께 사용 시 네 파일을 원자적으로 확정하며 실패·취소에는 부분 결과를 게시하지 않습니다.
 
 아래 소스 명령의 검토 묶음 검사는 새 출력 폴더를 만들지 않습니다. 성공 0, 오류 1, 취소 130을 반환하며 stdout은 경로 없는 요약입니다. 원본 재생 대조에도 NumPy/OpenCV는 필요하지 않고 FFmpeg가 필요합니다.
 
@@ -534,11 +541,12 @@ HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네�
 
 | 실험 | 결과 | 해석 |
 | --- | --- | --- |
-| 공개 테스트 | 524개 PASS | CLI·설치/패키지·차선/램프 관측 출처·좌표/단면·목록 진단·시각·추적·검토·사건 재생·저장 검사·평가·자원/종료 소유권·그림 출처 |
+| 공개 테스트 | 544개 PASS | CLI·설치/패키지·차선/램프 관측 출처·좌표/단면·목록 진단·시각·추적·검토·사건 재생·저장 검사·평가·자원/종료 소유권·그림 출처 |
 | 차선 출력 후처리 | 자체 logits·회전 pixel pattern·실제 합성 CFR/VFR/offset/회전 영상 | 네 slot/raw mask·누락/범위 초과 보존·명시 회전 1회 복원·원본 coded 좌표/PTS·stale 거부·실패/취소/정리. 학습 모델 정확도 아님 |
 | 차선 단면·이력 | 자체 곡선/게이트·실제 합성 원본의 decoder→단면→사건 | 가시 인접 segment만·None gap/다중 교차/순서 불명 보류·caller ID/pose·모델/맥락 변경 시 이력 단절·원본/실패/취소/정리. 자동 의미 판단 아님 |
 | 차선 출처 저장·재생 | v1 호환·v2 roundtrip·44프레임 두 후보/맥락 변경·실제 capture/CLI | 좌표/mask/맥락 해시 연결·단면 재계산·source reset 재현·원본 유/무 readonly batch 검사·출처 누락/목록 drift 거부·실패/취소/정리 |
 | 차선 목록 진단 | v1 미기록/v2 출처·0후보 unknown·맥락 변경·실제 CLI | 원본 시각의 단면/사건 상태·출처 단절 분리·입력 결합 readonly reader·기본 목록/선택 유지·원자적 확정/복구 |
+| 램프 목록 진단 | v1/v2 미기록·v3 선언/unknown·좌우 geometry·공백·출처 변경·6종 합성 원본 | 순수 입력 진단과 원본 reset 대조·noML reader·두 CLI/동시 옵션·기존 목록/선택·원자적 확정/취소/복구 |
 | 램프 출처·수치 경계 | v3 저장·네 회전/리사이즈·정수/subpixel 독립 oracle·실제 MP4 | 원본 whole-pixel 밝기 보존·좌우/의미/가시성 unknown·출처 단절·변조 거부·역순 클립/readonly 검사. 자동 ROI 인식·실차 정확도 아님 |
 | 사건 종단 간 | 자체 이동 박스·좌우 램프의 실제 encoded MP4 | native Tracker→우측 변경/우측 점멸→14프레임 검토/원본 클립·모든 램프 근거 PTS 포함 |
 | 입력 재생 | 합성 원본·저장/읽기·새 엔진·14프레임 후보 클립 | 원래 후보/램프 결과 동일·설정/원본 해시 연결·가림/누락 unknown·조작된 PTS 거부 |
