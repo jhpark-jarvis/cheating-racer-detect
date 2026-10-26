@@ -195,10 +195,25 @@ def export_catalog_with_diagnostics(input_path, inputs, output_path, *, toolchai
     Returns (CandidateCatalog, owned diagnostic dict). The sidecar is descriptive,
     not a new trusted catalogue/batch schema or an analysis cache.
     """
-    return _export_listing(input_path, inputs, output_path, toolchain, True)
+    return _export_listing(input_path, inputs, output_path, toolchain, True)[:2]
 
 
-def _export_listing(input_path, inputs, output_path, toolchain, include_diagnostics):
+@source_job
+def export_catalog_with_lamp_diagnostics(input_path, inputs, output_path, *, toolchain=None,
+                                         include_lane_diagnostics=False):
+    """Return (catalog, lamp report, optional lane report); publish all or none.
+
+    Neither diagnostic is a cache or a new candidate/batch contract. Default
+    listing and the existing lane-only API keep their previous bytes/returns.
+    """
+    if type(include_lane_diagnostics) is not bool:
+        raise AppError('INVALID_DIAGNOSTICS', '차선 진단 선택은 명시적 bool이어야 합니다.')
+    catalog, lanes, lamps = _export_listing(input_path, inputs, output_path, toolchain,
+                                            include_lane_diagnostics, True)
+    return catalog, lamps, lanes
+
+
+def _export_listing(input_path, inputs, output_path, toolchain, include_diagnostics, include_lamps=False):
     from .replay import analyze_inputs
     if not isinstance(inputs, EventInputs):
         raise AppError('INVALID_INPUTS', '검증된 관측 입력이 필요합니다.')
@@ -220,22 +235,33 @@ def _export_listing(input_path, inputs, output_path, toolchain, include_diagnost
                 for row,item in zip(inputs.rows, diagnostics['rows']) if item['source_reset_reason'] is not None)
             if candidates != analysis.candidates or resets != analysis.lane_resets:
                 raise AppError('INVALID_DIAGNOSTICS', '원본 재생과 차선 진단 결과가 다릅니다.')
+        lamps = None
+        if include_lamps:
+            from .lamp_diagnostics import lamp_diagnostics
+            lamps = lamp_diagnostics(inputs)
+            resets = tuple((row.frame, item['source_reset_reason'])
+                for row, item in zip(inputs.rows, lamps['rows']) if item['source_reset_reason'] is not None)
+            if resets != analysis.lamp_resets:
+                raise AppError('INVALID_DIAGNOSTICS', '원본 재생과 램프 출처 단절이 다릅니다.')
         with owned_output(output_path) as stage:
             write_bytes(stage/'inputs.json', inputs.to_bytes())
             write_bytes(stage/'catalog.json', catalog.to_bytes())
             if diagnostics is not None:
                 from .diagnostics import diagnostics_bytes
                 write_bytes(stage/'lane-diagnostics.json', diagnostics_bytes(diagnostics))
+            if lamps is not None:
+                from .diagnostics import diagnostics_bytes
+                write_bytes(stage/'lamp-diagnostics.json', diagnostics_bytes(lamps))
             local_path(source)
             if before != _identity(source) or source_hash != _sha256(source):
                 raise AppError('INPUT_CHANGED', '목록 생성 중 원본 영상이 변경되었습니다.')
             release_pixels()
-        return catalog, diagnostics
+        return catalog, diagnostics, lamps
     except OSError:
         raise AppError('IO_ERROR', '원본 접근 권한과 목록 저장 공간을 확인하세요.') from None
 
 
-def listing_summary(catalog, diagnostics=None):
+def listing_summary(catalog, diagnostics=None, lamp_diagnostics=None):
     """Common legacy-compatible/redacted installed and source CLI output."""
     result = catalog.report()
     keys = ('candidate_index', 'direction', 'start', 'crossing', 'completion', 'signal_state', 'left', 'right')
@@ -245,4 +271,7 @@ def listing_summary(catalog, diagnostics=None):
     if diagnostics is not None:
         from .diagnostics import diagnostics_summary
         summary['lane_diagnostics'] = diagnostics_summary(diagnostics)
+    if lamp_diagnostics is not None:
+        from .lamp_diagnostics import lamp_diagnostics_summary
+        summary['lamp_diagnostics'] = lamp_diagnostics_summary(lamp_diagnostics)
     return summary

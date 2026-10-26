@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cheating_racer_detect.errors import AppError
 from cheating_racer_detect.events.catalog import export_catalog, export_catalog_with_diagnostics, listing_summary
+from cheating_racer_detect.events.catalog import export_catalog_with_lamp_diagnostics
 from cheating_racer_detect.events.inputs import load_inputs
 
 
@@ -18,10 +19,15 @@ def main(argv=None):
     parser.add_argument('--inputs', required=True, type=Path, help='Recorded inputs.json')
     parser.add_argument('--output', required=True, type=Path, help='New catalogue folder (no media)')
     parser.add_argument('--lane-diagnostics', action='store_true', help='Include lane source/unknown/reset diagnostics')
+    parser.add_argument('--lamp-diagnostics', action='store_true', help='Include lamp declaration/ROI/gap/reset diagnostics')
     args = parser.parse_args(argv)
     try:
         inputs = load_inputs(args.inputs)
-        if args.lane_diagnostics:
+        if args.lamp_diagnostics:
+            catalog, lamps, lanes = export_catalog_with_lamp_diagnostics(
+                args.input, inputs, args.output, include_lane_diagnostics=args.lane_diagnostics)
+            result = listing_summary(catalog, lanes, lamps)
+        elif args.lane_diagnostics:
             catalog, diagnostics = export_catalog_with_diagnostics(args.input, inputs, args.output)
             result = listing_summary(catalog, diagnostics)
         else:

@@ -11,6 +11,7 @@ def register(commands):
     actions = events.add_subparsers(dest='event_command', required=True)
     listing = actions.add_parser('list', help='원본과 관측 입력을 검증해 후보 목록 저장')
     listing.add_argument('--lane-diagnostics', action='store_true', help='차선 출처·unknown·단절 진단 함께 저장/표시')
+    listing.add_argument('--lamp-diagnostics', action='store_true', help='좌우 램프 선언·ROI·공백·단절 진단 함께 저장/표시')
     replay = actions.add_parser('replay', help='명시 선택 후보의 검토 묶음 생성')
     for parser in (listing, replay):
         parser.add_argument('--input', required=True, type=Path, help='원본 로컬 MP4')
@@ -71,6 +72,11 @@ def _run(args):
     tools = discover_tools(args.ffmpeg_dir) if args.ffmpeg_dir is not None else None
     if args.event_command == 'list':
         from .catalog import export_catalog, export_catalog_with_diagnostics, listing_summary
+        if args.lamp_diagnostics:
+            from .catalog import export_catalog_with_lamp_diagnostics
+            catalog, lamps, lanes = export_catalog_with_lamp_diagnostics(
+                args.input, inputs, args.output, toolchain=tools, include_lane_diagnostics=args.lane_diagnostics)
+            return listing_summary(catalog, lanes, lamps)
         if args.lane_diagnostics:
             catalog, diagnostics = export_catalog_with_diagnostics(args.input, inputs, args.output, toolchain=tools)
             return listing_summary(catalog, diagnostics)
