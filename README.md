@@ -70,6 +70,23 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 **학습 utility를 제거한 ResNet-18 구조**는 난수 가중치로 CPU/GPU 합성 forward를 확인했습니다. 학습 가중치를 적용한 탐지 결과가 아니며 정확한 checkpoint 조건·실제 로딩과 실차 평가는 남아 있습니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
 
+#### UFLDv2 checkpoint acquisition
+
+2026-10-28 확인 기준, 실험 대상은 공식 model zoo의 **CULane / ResNet18**입니다. [Google Drive](https://drive.google.com/file/d/1oEjJraFr-3lxhX_OXduAGFWalWa6Xh3W/view?usp=sharing)와 [Baidu](https://pan.baidu.com/s/1Z3W4y3eA9xrXJ51-voK4WQ?pwd=pdzs)가 배포 경로이며, Drive 미리보기 제목은 `culane_res18.pth`입니다. 제목·논문 benchmark는 실제 파일의 내용·무결성이나 이 프로젝트의 성능을 증명하지 않습니다.
+
+| 조건 | 확인된 범위 |
+| --- | --- |
+| 코드 | 고정 revision의 [MIT LICENSE](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/LICENSE). 외부 checkpoint의 허가 범위를 코드 표기만으로 확정하지 않습니다. |
+| 학습 데이터·파생물 | [CULane 공식 조건](https://xingangpan.github.io/projects/CULane.html#license)은 학술/비학술 주체의 비상업 연구·개인 실험을 허용하고 출처 인용을 요구합니다. 원본/수정 데이터 재배포는 제한하며, 복원이 불가능한 학습 모델 등의 파생물 배포를 조건부 허용합니다. 데이터와 파생물의 상업 목적 사용은 허용하지 않습니다. |
+| 실제 배포 파일 | 검토한 자료만으로 파일별 추가 조건·발행자 checksum·정확한 학습 이력은 확정하지 못했습니다. 예정 용도와 checkpoint/backbone의 적용 조건 확인이 필요합니다. 상업 사용은 별도 허가나 대체 모델/데이터 검토가 필요합니다. |
+
+확보·검증 순서는 다음과 같습니다.
+
+1. 비상업 연구/상업 사용 목적과 정확한 파일의 조건을 확인한 뒤 공식 배포 경로에서 확보합니다. ResNet34·다른 dataset·v1·변환 mirror를 동일 파일로 대체하지 않습니다.
+2. 원본 URL·소스 revision·확보일·파일명·크기·`Get-FileHash -Algorithm SHA256 -LiteralPath <파일>` 결과를 기록합니다. 직접 계산한 해시는 이후 변경 탐지용이며 발행자 인증을 대신하지 않습니다.
+3. 제한된 CPU 로딩(`weights_only=True`, `map_location="cpu"`) 후 실제 래퍼·키·shape·dtype·유한값을 확인하고 strict 로딩합니다. [공식 저장 함수](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/utils/common.py#L101-L108)는 `model`/`optimizer` 래퍼를 만들지만 실제 배포 파일은 미검사입니다. 격리 실험용 로더는 이 래퍼를 거부하므로 실제 파일 확보 뒤 호환성 검토가 필요합니다. `weights_only=False`나 `strict=False`로 우회하지 않습니다.
+4. 학습 가중치의 CPU/GPU 합성 forward와 동일 원본 프레임의 좌표 연결을 검증한 뒤 실영상 평가로 진행합니다. 현재는 가중치 다운로드·로드 전 단계입니다.
+
 연결 흐름은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 외부 물리 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 좌표 decoder와 외부 조건 기반 단면 adapter는 구현됐지만, 조건 자체의 자동 인식은 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
 UFLDv2의 [고정 config](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/configs/culane_res18.py)는 입력 1600×320·crop ratio 0.6·4 lane slots를 사용합니다. [demo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/demo.py)와 [dataset](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/data/dataset.py)은 RGB resize 1600×533 뒤 아래 320행 crop을 구성합니다. decoder가 공급한 원본 W/H로 이미 복원한 점에는 crop/scale 역변환을 다시 적용하지 않습니다. row/column 표현·유효 slot을 보존해야 하며, 빠진 차선을 생략한 반환 list index를 물리 경계 ID로 쓰지 않습니다.
