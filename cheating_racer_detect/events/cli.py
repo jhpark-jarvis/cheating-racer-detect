@@ -26,6 +26,11 @@ def register(commands):
     verify.add_argument('--bundle', required=True, type=Path)
     verify.add_argument('--input', type=Path, help='선택적 원본 MP4')
     verify.add_argument('--ffmpeg-dir', type=Path)
+    listing_check = actions.add_parser('verify-list', help='저장 후보 목록·선택 진단 읽기 전용 검사')
+    listing_check.add_argument('--listing', required=True, type=Path)
+    listing_check.add_argument('--input', type=Path, help='선택적 원본 MP4; 새 재생 대조')
+    listing_check.add_argument('--ffmpeg-dir', type=Path)
+    listing_check.add_argument('--require-diagnostics', nargs='+', choices=('lane', 'lamp'), default=[])
     assess = actions.add_parser('evaluate', help='명시적인 실험 정답·예측의 사건/신호 평가')
     assess.add_argument('--labels', required=True, type=Path)
 
@@ -50,6 +55,13 @@ def run(args):
 
 
 def _run(args):
+    if args.event_command == 'verify-list':
+        from .listing import verify_listing
+        if args.ffmpeg_dir is not None and args.input is None:
+            raise AppError('INVALID_ARGUMENT', '--ffmpeg-dir는 원본 재생에만 사용하세요.')
+        tools = discover_tools(args.ffmpeg_dir) if args.ffmpeg_dir is not None else None
+        return verify_listing(args.listing, source=args.input, toolchain=tools,
+                              required_diagnostics=args.require_diagnostics)
     if args.event_command == 'evaluate':
         from .assessment import from_report
         from .verify import Files
