@@ -133,7 +133,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
         require(section_contract['section']['x'] == [10.,48.,86.] and
                 section_contract['status'] == 'ready' and section_contract['frame']['pts'] == 500)
         require(child([executable, '--version'], external).strip() == imported['version'])
-        for action in ('list', 'replay', 'verify', 'evaluate'):
+        for action in ('list', 'replay', 'verify', 'verify-list', 'evaluate'):
             child([executable, 'events', action, '--help'], external)
         child([python, '-I', '-m', 'cheating_racer_detect', 'events', '--help'], external)
         missing_tools = child([executable, 'doctor', '--ffmpeg-dir', temp/'no-tools'], external, expected=2, parsed=True)
@@ -171,6 +171,15 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                 listing['lane_diagnostics']['counts']['source_resets'] == 0)
         require(listing['lamp_diagnostics']['counts']['input_rows'] == 44 and
                 listing['lamp_diagnostics']['counts']['source_resets'] == 0)
+        for source_replay in (False, True):
+            verify_args = [executable, 'events', 'verify-list', '--listing', fixture/'listed',
+                           '--require-diagnostics', 'lane', 'lamp']
+            if source_replay:
+                verify_args += ['--input', source, '--ffmpeg-dir', tools.ffmpeg.parent]
+            checked = child(verify_args, external, parsed=True)
+            require(checked['files_checked'] == 4 and checked['candidate_count'] == 2 and
+                    checked['source_replayed'] is source_replay and
+                    checked['signal_context_verified'] is source_replay)
         diagnostic = child([python, '-I', '-c',
             'import sys,json; from cheating_racer_detect.events.inputs import load_inputs; '
             'from cheating_racer_detect.events.diagnostics import load_lane_diagnostics; '
@@ -191,6 +200,8 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
             'from cheating_racer_detect.events.lamp_diagnostics import load_lamp_diagnostics; '
             'lamps=load_lamp_diagnostics(sys.argv[3],i); '
             'assert lamps["counts"]["input_rows"]==44 and lamps["counts"]["legacy_rows"]==0; '
+            'from pathlib import Path; from cheating_racer_detect.events.listing import verify_listing; '
+            'assert verify_listing(Path(sys.argv[1]).parent)["files_checked"]==4; '
             'assert not any(n in sys.modules for n in ("numpy","cv2","torch")); '
             'print(json.dumps(r["counts"]))',fixture/'listed/lane-diagnostics.json',record,
             fixture/'listed/lamp-diagnostics.json'],external,parsed=True)
@@ -250,6 +261,7 @@ def run(uv, build_python, ffmpeg_dir, cache=None):
                   'base_lamp_observations': True,
                   'base_lamp_precision': True,
                   'base_lamp_diagnostics': True,
+                  'base_listing_verification': True,
                   'optional': optional, 'source_preserved': True}
     return {**result, 'temporary_cleanup': not temp.exists()}
 

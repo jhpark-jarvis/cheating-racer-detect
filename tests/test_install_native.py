@@ -41,6 +41,7 @@ class Installed(unittest.TestCase):
         self.assertTrue(result['base_lamp_observations'])
         self.assertTrue(result['base_lamp_precision'])
         self.assertTrue(result['base_lamp_diagnostics'])
+        self.assertTrue(result['base_listing_verification'])
         self.assertEqual(result['dependency_error'], 'DEPENDENCY_MISSING')
         self.assertEqual(result['optional']['status'], 'NOT_RUN')
         self.assertTrue(result['temporary_cleanup'])
