@@ -48,11 +48,11 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 ### 2.1 Automatic lane candidates
 
-차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 후보 비교는 2026-10-14, UFLDv2 설치 사전 점검은 2026-10-18 원저자 자료 기준입니다. 아래 모델은 **모두 미채택이며 학습 가중치의 이 PC 실행·실영상 성능은 미검증**입니다.
+차선 모델은 프레임별 경계 위치를 제공합니다. 차량의 차선 변경 사건, 물리 경계의 연속 ID, 자차 이동·합류 판단은 별도입니다. 후보 비교는 2026-10-14, UFLDv2 설치 사전 점검은 2026-10-18 원저자 자료 기준입니다. 아래 모델은 **모두 미채택이며 실영상 성능은 미검증**입니다. UFLDv2 공식 학습 가중치의 로컬 합성 실행은 2026-10-29 확인했습니다.
 
 | 후보 | 방식·비교 목적 | 실행·연결 조건 |
 | --- | --- | --- |
-| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 최소 추론 구조 실험 | 난수 CPU/GPU 구조 검증·좌표 후처리 API 구현. 학습 checkpoint의 조건/로딩·실차 성능 미검증, 원본 DALI 경로 자동 설치 미지원 |
+| [UFLDv2 · ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2) | row/column hybrid anchors·존재 분류; 최소 추론 구조 실험 | 공식 checkpoint의 제한 CPU/strict 로딩·합성 CPU/GPU·동일 Frame 좌표 후처리 연결 확인. 정확한 용도별 조건은 아래 구분, 실차 성능 미검증·원본 DALI 경로 자동 설치 미지원 |
 | [CLRNet · ResNet-18](https://github.com/Turoad/CLRNet) | cross-layer refinement; 같은 입력에서 위치 정밀화 대안 | 공식 시험은 Ubuntu·Python3.8/Torch1.6/CUDA10.2. CUDA NMS와 현재 Windows 환경의 호환성 미확인 |
 | [CLRerNet · DLA-34](https://github.com/hirotomusiker/CLRerNet) | LaneIoU 기반 assignment/loss; 위치와 confidence 관계 비교 | mmdetection3.3·별도 CUDA NMS·Docker 권고. 점수가 차선 안정성이나 위반 확률은 아님 |
 
@@ -66,13 +66,13 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 | --- | --- |
 | 의존성 | [model](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/model/model_culane.py)과 aux module 모두 `utils.common → data.dali_data → DALI/my_interp`로 연결됩니다. demo만 우회해서는 분리되지 않습니다. [DALI 공식 지원](https://docs.nvidia.com/deeplearning/dali/user-guide/docs/support_matrix.html)은 Linux 플랫폼이며 native Windows 준비 증거가 아닙니다. |
 | 생성·로딩 | 기본 factory는 `pretrained=True`·CUDA를 사용합니다. 분리안에는 backbone 다운로드 비활성화·명시 device·승인된 로컬 full checkpoint의 `weights_only=True`/CPU 로드·키/shape 대조·strict 로딩이 필요합니다. [backbone 소스](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/model/backbone.py), [PyTorch 로딩 문서](https://docs.pytorch.org/docs/2.8/generated/torch.load.html) |
-| 환경·권리 | 기존 Torch/TorchVision 환경의 존재가 UFLDv2 호환성 증거는 아닙니다. wheel의 CUDA runtime과 extension용 toolkit/compiler는 별도입니다. [공식 model zoo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/README.md)의 CULane ResNet18을 식별했지만 실제 파일 해시·적용 권리·학습 원자료 조건은 미확정입니다. |
+| 환경·권리 | 기존 Torch/TorchVision 환경의 존재가 UFLDv2 호환성 증거는 아닙니다. wheel의 CUDA runtime과 extension용 toolkit/compiler는 별도입니다. [공식 model zoo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/README.md)의 CULane ResNet18 파일은 후속 실험에서 확보·해시/로딩을 확인했습니다. 코드·데이터·파일별 조건과 제한은 아래에 구분합니다. |
 
-**학습 utility를 제거한 ResNet-18 구조**는 난수 가중치로 CPU/GPU 합성 forward를 확인했습니다. 학습 가중치를 적용한 탐지 결과가 아니며 정확한 checkpoint 조건·실제 로딩과 실차 평가는 남아 있습니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다.
+**학습 utility를 제거한 ResNet-18 구조**는 난수 구조 시험 뒤 공식 학습 checkpoint의 제한 로딩·CPU/GPU 합성 forward까지 확인했습니다. 원본 requirements 일괄 설치나 WSL/새 CUDA 환경 전환을 채택한 것은 아닙니다. 실차 평가는 남아 있습니다.
 
 #### UFLDv2 checkpoint acquisition
 
-2026-10-28 확인 기준, 실험 대상은 공식 model zoo의 **CULane / ResNet18**입니다. [Google Drive](https://drive.google.com/file/d/1oEjJraFr-3lxhX_OXduAGFWalWa6Xh3W/view?usp=sharing)와 [Baidu](https://pan.baidu.com/s/1Z3W4y3eA9xrXJ51-voK4WQ?pwd=pdzs)가 배포 경로이며, Drive 미리보기 제목은 `culane_res18.pth`입니다. 제목·논문 benchmark는 실제 파일의 내용·무결성이나 이 프로젝트의 성능을 증명하지 않습니다.
+공식 model zoo의 **CULane / ResNet18**을 [Google Drive](https://drive.google.com/file/d/1oEjJraFr-3lxhX_OXduAGFWalWa6Xh3W/view?usp=sharing)에서 2026-10-29 확보했습니다. [Baidu](https://pan.baidu.com/s/1Z3W4y3eA9xrXJ51-voK4WQ?pwd=pdzs)는 공식 대체 경로입니다. 실제 파일은 `culane_res18.pth`, 825,264,756bytes이며 자체 SHA-256은 `956616371ee758551c455d28c1c8a9732b39d7fbd85bc70b9869424a5121f967`입니다. 발행자 checksum 대조나 다른 내려받기의 동일성 보증은 아닙니다.
 
 | 조건 | 확인된 범위 |
 | --- | --- |
@@ -84,8 +84,8 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 1. 비상업 연구/상업 사용 목적과 정확한 파일의 조건을 확인한 뒤 공식 배포 경로에서 확보합니다. ResNet34·다른 dataset·v1·변환 mirror를 동일 파일로 대체하지 않습니다.
 2. 원본 URL·소스 revision·확보일·파일명·크기·`Get-FileHash -Algorithm SHA256 -LiteralPath <파일>` 결과를 기록합니다. 직접 계산한 해시는 이후 변경 탐지용이며 발행자 인증을 대신하지 않습니다.
-3. 제한된 CPU 로딩(`weights_only=True`, `map_location="cpu"`) 후 실제 래퍼·키·shape·dtype·유한값을 확인하고 strict 로딩합니다. [공식 저장 함수](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/utils/common.py#L101-L108)는 `model`/`optimizer` 래퍼를 만들지만 실제 배포 파일은 미검사입니다. 격리 실험용 로더는 이 래퍼를 거부하므로 실제 파일 확보 뒤 호환성 검토가 필요합니다. `weights_only=False`나 `strict=False`로 우회하지 않습니다.
-4. 학습 가중치의 CPU/GPU 합성 forward와 동일 원본 프레임의 좌표 연결을 검증한 뒤 실영상 평가로 진행합니다. 현재는 가중치 다운로드·로드 전 단계입니다.
+3. 제한된 CPU 로딩(`weights_only=True`, `map_location="cpu"`) 후 실제 래퍼·키·shape·dtype·유한값을 확인하고 strict 로딩합니다. [공식 저장 함수](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/utils/common.py#L101-L108)의 `model`/`optimizer` 구조와 달리 확보 파일은 **legacy PyTorch 형식의 model-only 래퍼·텐서 128개**였습니다. 기존 로더의 허용 범위를 확대하지 않고 통과했습니다. `weights_only=False`나 `strict=False`로 우회하지 않습니다.
+4. 학습 가중치의 CPU/GPU 합성 forward와 동일 프레임의 좌표 연결을 검증한 뒤 실영상 평가로 진행합니다. 격리 실험에서 Torch2.8.0/TorchVision0.23.0·CPU/RTX2070의 네 head shape/유한값과 `rtol=1e-4, atol=1e-5` 대조가 통과했습니다. 자체 단색 RGB 320×180의 동일 Frame·PTS·4슬롯을 보존했으며 유효점은 0개였습니다. 이는 **파일 호환성·합성 연결 검증**이며 실차 가시성·차선 정확도·변경 사건 수락은 아닙니다.
 
 연결 흐름은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 외부 물리 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 좌표 decoder와 외부 조건 기반 단면 adapter는 구현됐지만, 조건 자체의 자동 인식은 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
