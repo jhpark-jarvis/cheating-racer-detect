@@ -56,7 +56,7 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 | [CLRNet · ResNet-18](https://github.com/Turoad/CLRNet) | cross-layer refinement; 같은 입력에서 위치 정밀화 대안 | 공식 시험은 Ubuntu·Python3.8/Torch1.6/CUDA10.2. CUDA NMS와 현재 Windows 환경의 호환성 미확인 |
 | [CLRerNet · DLA-34](https://github.com/hirotomusiker/CLRerNet) | LaneIoU 기반 assignment/loss; 위치와 confidence 관계 비교 | mmdetection3.3·별도 CUDA NMS·Docker 권고. 점수가 차선 안정성이나 위반 확률은 아님 |
 
-후속 제안은 **UFLDv2의 격리 추론 분리**, 대안은 CLRNet·CLRerNet입니다. Windows 지원·속도/정확도 순위가 아닙니다. 코드 표기는 각각 [MIT](https://raw.githubusercontent.com/cfzd/Ultra-Fast-Lane-Detection-v2/master/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/Turoad/CLRNet/main/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/hirotomusiker/CLRerNet/main/LICENSE)이며, CLRNet의 [설치 metadata](https://raw.githubusercontent.com/Turoad/CLRNet/main/setup.py)는 MIT classifier로 불일치합니다. 가중치·학습 데이터 조건은 코드와 별도로 확인해야 합니다. 특히 [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 데이터/파생물의 비상업 용도와 재배포 조건을 구분합니다. 프로젝트 라이선스나 배포 모델을 이 표로 확정하지 않습니다.
+현재 격리 실험은 **UFLDv2**, 비교 대안은 CLRNet·CLRerNet입니다. Windows 지원·속도/정확도 순위가 아닙니다. 코드 표기는 각각 [MIT](https://raw.githubusercontent.com/cfzd/Ultra-Fast-Lane-Detection-v2/master/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/Turoad/CLRNet/main/LICENSE), [Apache-2.0](https://raw.githubusercontent.com/hirotomusiker/CLRerNet/main/LICENSE)이며, CLRNet의 [설치 metadata](https://raw.githubusercontent.com/Turoad/CLRNet/main/setup.py)는 MIT classifier로 불일치합니다. 가중치·학습 데이터 조건은 코드와 별도로 확인해야 합니다. 특히 [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 데이터/파생물의 비상업 용도와 재배포 조건을 구분합니다. 프로젝트 라이선스나 배포 모델을 이 표로 확정하지 않습니다.
 
 #### UFLDv2 installation preflight
 
@@ -86,6 +86,19 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 2. 원본 URL·소스 revision·확보일·파일명·크기·`Get-FileHash -Algorithm SHA256 -LiteralPath <파일>` 결과를 기록합니다. 직접 계산한 해시는 이후 변경 탐지용이며 발행자 인증을 대신하지 않습니다.
 3. 제한된 CPU 로딩(`weights_only=True`, `map_location="cpu"`) 후 실제 래퍼·키·shape·dtype·유한값을 확인하고 strict 로딩합니다. [공식 저장 함수](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/utils/common.py#L101-L108)의 `model`/`optimizer` 구조와 달리 확보 파일은 **legacy PyTorch 형식의 model-only 래퍼·텐서 128개**였습니다. 기존 로더의 허용 범위를 확대하지 않고 통과했습니다. `weights_only=False`나 `strict=False`로 우회하지 않습니다.
 4. 학습 가중치의 CPU/GPU 합성 forward와 동일 프레임의 좌표 연결을 검증한 뒤 실영상 평가로 진행합니다. 격리 실험에서 Torch2.8.0/TorchVision0.23.0·CPU/RTX2070의 네 head shape/유한값과 `rtol=1e-4, atol=1e-5` 대조가 통과했습니다. 자체 단색 RGB 320×180의 동일 Frame·PTS·4슬롯을 보존했으며 유효점은 0개였습니다. 이는 **파일 호환성·합성 연결 검증**이며 실차 가시성·차선 정확도·변경 사건 수락은 아닙니다.
+
+#### Trained inference on decoded media
+
+2026-11-02 격리 실험에서 **실제 FFmpeg 디코딩 → coded BGR/RGB 변환 → 학습 CPU 추론 → 동일 Frame 디코더**를 연결했습니다. 입력은 자체 생성한 96×64 색 패턴 MP4이며, 독립 ffprobe의 정수 PTS·time base와 별도 RGB 디코딩을 대조했습니다.
+
+| 원본 프로필 | 선택 프레임 | 확인한 시간·좌표 조건 |
+| --- | ---: | --- |
+| CFR | 6 | ordinal 1~6, 정규화 시각 0.1~0.6초·간격 0.1초 |
+| VFR | 3 | 시각 0.1/0.3/0.6초·간격 0.2/0.3초, 평균 FPS로 환산하지 않음 |
+| 5초 offset | 6 | `first_pts=51200`, `time_base=1/10240` 보존·정규화 시각 대조 |
+| 회전 metadata 90/180/270° | 18 | coded raster 유지, metadata를 전처리 회전으로 자동 적용하지 않음 |
+
+기본 33프레임과 명시 회전·누락·오류/취소 후 재시도 대조를 포함해 **42회 학습 forward**를 확인했습니다. 실제 적용한 회전만 coded 좌표로 역변환하고, 빈 슬롯을 보존합니다. 누락 프레임은 새 처리 구간으로 분리하며, stale Frame 출력은 거부하고 오류/취소 주입 뒤 연결 상태·임시 자료를 정리했습니다. 이 구간 표식은 차량/물리 차선 ID가 아닙니다. 색 패턴의 모델 응답에는 주행 GT가 없으므로 **실차 차선·가시성·변경 사건 정확도는 미검증**입니다.
 
 연결 흐름은 `모델 곡선 → 원본 coded 좌표 → 실제 차량 하단 y의 가시 경계 → 외부 물리 ID/자차·장면 게이트 → LaneSection`입니다. 현재 계약에는 인접 두 차선을 표현할 경계가 최소 3개 필요합니다. 경계 부족·y 범위 밖·합류/ID 불확실성을 외삽해 채우지 않으며, ego/후면 자세를 확인하지 못하면 사건을 보류합니다. 좌표 decoder와 외부 조건 기반 단면 adapter는 구현됐지만, 조건 자체의 자동 인식은 미구현입니다. 모델별 전처리를 차량 탐지용 640×640 letterbox와 혼동하지 않습니다. [입력 계약](cheating_racer_detect/events/contracts.py)
 
