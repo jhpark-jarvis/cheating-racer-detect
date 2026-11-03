@@ -104,7 +104,7 @@ YOLOX는 anchor-free 탐지와 decoupled head를 제안합니다. YOLOX-s를 후
 
 UFLDv2의 [고정 config](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/configs/culane_res18.py)는 입력 1600×320·crop ratio 0.6·4 lane slots를 사용합니다. [demo](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/demo.py)와 [dataset](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/blob/c903880678454dfd9b55a63022368db05c00bc6d/data/dataset.py)은 RGB resize 1600×533 뒤 아래 320행 crop을 구성합니다. decoder가 공급한 원본 W/H로 이미 복원한 점에는 crop/scale 역변환을 다시 적용하지 않습니다. row/column 표현·유효 slot을 보존해야 하며, 빠진 차선을 생략한 반환 list index를 물리 경계 ID로 쓰지 않습니다.
 
-고정 dataset 크기·30fps writer 대신 현재 원본 `Frame`·PTS를 유지합니다. 모델용 확대 입력은 원본 픽셀 증거나 현재 분석 축≤1024 지원 한계를 늘리지 않습니다. RGB/crop·slot 소실·좌표 회전은 합성 검증 대상이며, 실차 가림/자차 이동과 학습 가중치 평가는 미검증입니다.
+고정 dataset 크기·30fps writer 대신 현재 원본 `Frame`·PTS를 유지합니다. 모델용 확대 입력은 원본 픽셀 증거나 현재 분석 축≤1024 지원 한계를 늘리지 않습니다. RGB/crop·slot 소실·좌표 회전은 합성 검증 대상이며, 실차 가림/자차 이동과 학습 가중치의 실차 정확도는 미검증입니다.
 
 #### Frame-bound lane decoding
 
@@ -138,6 +138,19 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 ```
 
 `LaneSectionBridge`는 독립 `LaneEngine`을 소유합니다. 차선 모델·적용 회전·context ID·도로/slot↔물리 ID 연결이 바뀌거나 조건이 unknown/실패/취소가 되면 사건 이력을 끊습니다. `context_id`는 시각별 ID가 아닌 해석/정책 출처를 식별합니다. 저장·재생에는 §3.6의 명시적 v2 evidence를 사용합니다. 자동 가시성·물리 ID·ego/scene/pose 추론과 실차 수락은 후속 과제입니다. [단면·이력 계약 시험](tests/test_lane_sections.py), [실제 합성 원본 연결 시험](tests/test_lane_sections_native.py)
+
+#### Temporal context and observability
+
+시간 문맥으로 보완한 곡선, 현재 보이는 차선, 지속적인 물리 경계 ID는 별도 평가 대상입니다. 2026-11-03 원저자 자료에서 확인한 후속 연구 방향은 다음과 같습니다. 새 temporal 모델의 설치·추론·최종 채택은 수행하지 않았습니다.
+
+| 접근 | 연구 목적 | 소비할 때 필요한 구분 |
+| --- | --- | --- |
+| [RVLD](https://openaccess.thecvf.com/content/ICCV2023/html/Jin_Recursive_Video_Lane_Detection_ICCV_2023_paper.html) | 이전 출력의 motion warp와 현재 프레임 refinement | 과거 정보로 보완한 경계는 현재 구간 가시성의 증거가 아님 |
+| [LaneTCA](https://arxiv.org/html/2408.13852v1) | 단기·누적 attention의 시간 문맥 | memory 연속성과 물리 경계 ID·원본 시간/재시작 정책을 별도 검증 |
+| [VIL-100 주석](https://github.com/yujun0-0/MMA-Net/blob/8f95908e2814baee23c6189996062cf2d87f714a/dataset/README.md) | instance/가림 평가 자료 후보 | `id`는 순번, `lane_id`는 자차 기준 상대 위치, `occlusion`은 차선 단위 값. 지속 물리 ID·구간 전체 가시성 mask로 바로 변환하지 않음 |
+| [LK](https://docs.opencv.org/4.11.0/dc/d6b/group__video__track.html) + [RANSAC similarity](https://docs.opencv.org/4.11.0/d9/d0c/group__calib3d.html) | 비학습 영상면 이동 대조 | 대응 status·높은 inlier 비율은 자차 안정·가시성 인증이 아님 |
+
+기존 OpenCV 4.11.0의 **자체 320×192 합성 조건 8개**에서 정적/평행이동/회전·전경 이동·저질감·mask·복수 운동을 비교했습니다. 배경이 정적인데 전경만 6px 움직인 조건은 **180/180 inlier**로 전경 변환에 맞춰졌습니다. 합성 oracle mask를 주면 배경 control-point 오차가 약6.0014px에서0.000143px로 바뀌었으며, 이는 자동 mask 성능이 아닙니다. 저질감/전부 제외 mask는 `unknown`으로 남겼습니다. 결과는 **px/pair 영상면 변위**이며, 모든 조건에서 자차 상태·현재 가시성·물리 ID를 확정하지 않았습니다. 실주행 GT·카메라/장면 근거와 독립 gate 평가가 필요합니다.
 
 ### 2.2 Lamp ROI and signal candidates
 
