@@ -181,6 +181,10 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 
 일반 영상 입력을 원본 학습·평가 CLI에 연결하기 전에 이 경계를 분리해야 합니다. 현재는 소스 조사와 설계 단계이며 RVLD 가중치·basis 확보, 전체 추론·실주행 성능은 미검증입니다. 곡선 보완을 현재 가시성이나 지속 물리 경계 ID로 해석하지 않습니다.
 
+RVLD의 공식 배포는 [가중치 archive](https://drive.google.com/file/d/1PjbN2uQ-7DgFJjApH1vRx81vEo_Tvn-9/view?usp=sharing)와 [전처리 archive](https://drive.google.com/file/d/14JI2BIwJ677_rCBLGQiHvl6IF-n0LIwH/view?usp=sharing)로 나뉩니다. 코드가 기대하는 최소 역할은 segmentation·coefficient·temporal checkpoint 3개와 공통 SVD `U.pickle`입니다. [basis 생성 코드](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/Preprocessing/VIL-100/P02_SVD/code/libs/preprocess.py)는 CUDA tensor를 pickle로 저장하므로 단순 배열 파일로 가정하지 않습니다. 실제 archive의 파일 구성·해시·객체 형식은 아직 미검증입니다.
+
+RVLD 저장소의 [Apache-2.0 고지](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/LICENSE)와 VIL-100의 [CC BY-NC-SA 4.0 데이터 조건](https://github.com/yujun0-0/MMA-Net/blob/8f95908e2814baee23c6189996062cf2d87f714a/dataset/README.md)은 구분합니다. 각 배포물의 내부 고지·적용 조건과 제한 로딩을 확인한 뒤 실제 추론을 평가해야 합니다. 배포 링크가 공개돼 있다는 사실을 전체 파일의 재배포 허가나 모델 실행 검증으로 해석하지 않습니다.
+
 ### 2.2 Lamp ROI and signal candidates
 
 램프 **부분 위치 → 차량 기준 좌우·방향지시등 의미·가시성 → 원본 시각의 점멸**을 분리합니다. 아래에는 실제 연구 모델과 개발 접근이 함께 있으며 모두 자동 ROI 구현/실차 평가 전입니다.
