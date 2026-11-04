@@ -152,6 +152,23 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 
 기존 OpenCV 4.11.0의 **자체 320×192 합성 조건 8개**에서 정적/평행이동/회전·전경 이동·저질감·mask·복수 운동을 비교했습니다. 배경이 정적인데 전경만 6px 움직인 조건은 **180/180 inlier**로 전경 변환에 맞춰졌습니다. 합성 oracle mask를 주면 배경 control-point 오차가 약6.0014px에서0.000143px로 바뀌었으며, 이는 자동 mask 성능이 아닙니다. 저질감/전부 제외 mask는 `unknown`으로 남겼습니다. 결과는 **px/pair 영상면 변위**이며, 모든 조건에서 자차 상태·현재 가시성·물리 ID를 확정하지 않았습니다. 실주행 GT·카메라/장면 근거와 독립 gate 평가가 필요합니다.
 
+#### Motion-mask sensitivity and temporal preflight
+
+![자체 합성 영상의 제외 영역별 배경 이동 추정 오차](assets/figures/motion-mask-study.svg)
+
+*Figure 2a. 자체 합성 텍스처 6쌍·제외 방식 6종의 36조건 중 세 경로 비교. 수치는 알려진 배경 변환과 추정 변환의 세 control-point 최대 오차입니다. 실제 로컬 YOLOX-s는 12장 모두 차량 검출 0개여서 자동 제외는 no-mask와 같습니다. 차량 검출 정확도·실주행 결과가 아닙니다. [재현 가능한 그림](scripts/render_motion_mask_figure.py)*
+
+배경에 충분한 특징이 남은 네 조건에서 정답 영역 제외의 오차는 0.0001px 미만~0.0296px였습니다. 저질감 배경과 전부 제외된 조건은 `unknown`입니다. 고의로 축소·이동시킨 제외 영역은 전경 변환을 계속 선택할 수 있었고, **4×4 격자 전체에 특징점이 분포한 경우에도** 잘못된 배경 fit이 나왔습니다. 영역의 출처·특징의 의미를 inlier 비율이나 공간 분포로 대신할 수 없습니다. 정답 mask는 source/target 전경 union에 12px 여유를 준 실험 조건이며 제품 임계치가 아닙니다.
+
+2026-11-04 고정 VIL-100 구현의 정적 사전 점검 결과입니다. 새 temporal 모델 설치·추론·VRAM/실차 성능은 미검증입니다.
+
+| 후보 | 확인한 실행 의존성·시간 상태 | 통합 전에 확인할 조건 |
+| --- | --- | --- |
+| [RVLD 고정 소스](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876/Modeling/VIL-100/PLD/code) | segmentation·coefficient·temporal 모델, SVD basis와 전처리 자료; 직전 특징/확률/guide를 warp | 제한 로딩·명시 device·DeformConv2d native 호환성, 원본 시간과 장면 전환 시 초기화 |
+| [LaneTCA 고정 소스](https://github.com/Alex-1337/LaneTCA/tree/81573cf6d74edee02ea93a3a5f22f8946dc9f8f9/Modeling/VIL-100/code) | 같은 앞단 구조에 long/short attention·position 상태 추가 | 모델 내부 상태까지 초기화하는 계약, attention 메모리 비용·native 호환성 |
+
+두 소스의 데이터 순번 기반 `prev_num` 초기화는 원본 PTS·가변 프레임 간격·장면 전환 검증을 대신하지 않습니다. 기본 checkpoint 로더의 `strict=False`·GPU 지정 방식과 pickle 보조 자료도 현재 제한 로딩 계약에 맞춰 분리해야 합니다. 이 비교는 후보 실행 경로의 조사이며 모델 우열·최종 채택이나 기존 UFLDv2 가중치의 재사용 가능성을 입증하지 않습니다.
+
 ### 2.2 Lamp ROI and signal candidates
 
 램프 **부분 위치 → 차량 기준 좌우·방향지시등 의미·가시성 → 원본 시각의 점멸**을 분리합니다. 아래에는 실제 연구 모델과 개발 접근이 함께 있으며 모두 자동 ROI 구현/실차 평가 전입니다.

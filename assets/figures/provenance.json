@@ -93,6 +93,16 @@
       "scope": "Directly authored conceptual research comparison, not copied or traced from paper figures. Simplified decoupled detection and spatial/temporal signal context; no architecture equivalence, paper metrics or final model adoption claim."
     }
   ],
+  "research_plots": [
+    {
+      "file": "motion-mask-study.svg",
+      "kind": "original-synthetic-study-plot",
+      "created": "2026-11-04",
+      "sha256": "759a4d6e4f27b5560824544ab0b6a07aec5f72e1f6e3f8a717c817e41c4de8cb",
+      "source": ["scripts/render_motion_mask_figure.py"],
+      "scope": "Own seeded texture pairs and OpenCV fits. Actual local YOLOX-s detected zero vehicles in 12 texture images; oracle masks are ground truth, not automatic mask accuracy. Not driving accuracy, metric ego motion, visibility or lane identity."
+    }
+  ],
   "notes": [
     "Original explanatory assets; no third-party paper figures copied.",
     "Generated concepts are not scientific evidence. Captions distinguish synthetic experiments, implemented APIs and planned algorithms."

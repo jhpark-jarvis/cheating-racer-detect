@@ -32,7 +32,7 @@ class Figures(unittest.TestCase):
     def test_readme_embeds_all_figures_and_local_links_resolve(self):
         readme = (ROOT/'README.md').read_text(encoding='utf-8')
         images = re.findall(r'!\[[^\]]*\]\((assets/figures/[^)]+)\)', readme)
-        self.assertEqual(len(images), 8)
+        self.assertEqual(len(images), 9)
         for target in re.findall(r'\]\(([^)]+)\)', readme):
             if target.startswith(('http:', 'https:', '#')):
                 continue
@@ -88,6 +88,26 @@ class Figures(unittest.TestCase):
                 self.assertEqual(record['references'], ['https://arxiv.org/abs/2107.08430', 'https://arxiv.org/abs/1905.01333'])
                 for text in ('YOLOX', 'DeepSignals', 'not implemented', 'unknown'):
                     self.assertIn(text, labels)
+
+    def test_motion_plot_is_safe_reproducible_and_labels_unknown(self):
+        from scripts.render_motion_mask_figure import render
+        ledger = json.loads((ROOT/'assets/figures/provenance.json').read_text(encoding='utf-8'))
+        self.assertEqual(len(ledger['research_plots']), 1)
+        record = ledger['research_plots'][0]
+        self.assertEqual(record['file'], 'motion-mask-study.svg')
+        data = (ROOT/'assets/figures'/record['file']).read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), record['sha256'])
+        self.assertEqual(data, render().encode('utf-8'))
+        self.assertLess(len(data), 20_000)
+        svg = ET.fromstring(data)
+        for item in svg.iter():
+            self.assertNotIn(item.tag.split('}')[-1], ('script', 'image', 'foreignObject', 'a'))
+            self.assertFalse(any(k.startswith('on') or k.endswith('href') for k in item.attrib))
+        labels = ' '.join(svg.itertext())
+        for marker in ('unknown', '0 vehicle boxes / 12', 'oracle is not automatic performance', 'px/pair'):
+            self.assertIn(marker, labels)
+        for source in record['source']:
+            self.assertTrue((ROOT/source).is_file())
 
 
 if __name__ == '__main__':
