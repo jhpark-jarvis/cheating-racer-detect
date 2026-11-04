@@ -169,6 +169,18 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 
 두 소스의 데이터 순번 기반 `prev_num` 초기화는 원본 PTS·가변 프레임 간격·장면 전환 검증을 대신하지 않습니다. 기본 checkpoint 로더의 `strict=False`·GPU 지정 방식과 pickle 보조 자료도 현재 제한 로딩 계약에 맞춰 분리해야 합니다. 이 비교는 후보 실행 경로의 조사이며 모델 우열·최종 채택이나 기존 UFLDv2 가중치의 재사용 가능성을 입증하지 않습니다.
 
+#### RVLD inference boundary
+
+[고정 RVLD 구현](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876/Modeling/VIL-100/PLD/code)의 31개 소스 파일을 정적으로 조사했습니다. 원본 CLI는 학습·평가·시각화를 포함한 로컬 모듈 31개를 import하며, segmentation/coefficient/temporal 모델과 후처리·메모리를 시작점으로 잡은 집합은 package 초기화까지 9개입니다. 이는 **정적 의존성 비교**이며 실행 속도·메모리 개선 측정이나 모델 설치 완료가 아닙니다.
+
+| 분리 경계 | 확인한 사실 | 필요한 후속 검증 |
+| --- | --- | --- |
+| 생성·로딩 | segmentation의 `pretrained=True`, 세 모델·후처리의 pickle basis 로딩, GPU 이동·모듈 수준 RNG 변경 | 자동 요청 없는 생성, 역할별 3checkpoint와 basis의 출처·제한 로딩·명시 device |
+| 입력·출력 | RGB를 **640×504로 resize한 뒤 상단 120행 제거**, 정규화; SVD basis·100개 y표본·6계수 설정 | 보간·crop 복원·좌표 관례 대조. 기존 UFLDv2 4head decoder와 별도 adapter 필요 |
+| 시퀀스 | 특징·확률·guide와 후처리 상태가 프레임 간 이어짐 | 원본 시각/문맥 변경·누락·실패·취소에서 전체 상태 초기화와 fresh 실행 대조 |
+
+일반 영상 입력을 원본 학습·평가 CLI에 연결하기 전에 이 경계를 분리해야 합니다. 현재는 소스 조사와 설계 단계이며 RVLD 가중치·basis 확보, 전체 추론·실주행 성능은 미검증입니다. 곡선 보완을 현재 가시성이나 지속 물리 경계 ID로 해석하지 않습니다.
+
 ### 2.2 Lamp ROI and signal candidates
 
 램프 **부분 위치 → 차량 기준 좌우·방향지시등 의미·가시성 → 원본 시각의 점멸**을 분리합니다. 아래에는 실제 연구 모델과 개발 접근이 함께 있으며 모두 자동 ROI 구현/실차 평가 전입니다.
