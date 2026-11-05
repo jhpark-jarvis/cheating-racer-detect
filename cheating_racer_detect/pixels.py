@@ -40,7 +40,7 @@ class _Snapshot:
 
 
 @contextmanager
-def pixel_window(source, tools, video, timeline, first, count, *, complete=False):
+def pixel_window(source, tools, video, timeline, first, count, *, complete=False, _replace=False):
     """Yield a readonly stream positioned at a validated contiguous frame range.
 
     Analysis keeps EOF validation. Review may stop after count only AFTER its
@@ -57,6 +57,8 @@ def pixel_window(source, tools, video, timeline, first, count, *, complete=False
     before = _identity(source)
     validate_container(source)
     job = active_job()
+    if _replace and job is not None and job.pixel_readers:
+        raise AppError('OUTPUT_INVALID', '사용 중인 픽셀 창은 교체할 수 없습니다.')
     if job is not None and job.failed:
         raise AppError('INPUT_CHANGED', '변경된 원본의 작업은 새로 시작하세요.')
     key = (source, tools, before, video['index'], video['width'], video['height'],
@@ -92,14 +94,22 @@ def pixel_window(source, tools, video, timeline, first, count, *, complete=False
         snapshot.check()
         with snapshot.raw.open('rb') as stream:
             stream.seek((first-snapshot.first)*snapshot.size)
-            yield stream
+            if job is not None:
+                job.pixel_readers += 1
+            try:
+                yield stream
+            finally:
+                if job is not None:
+                    job.pixel_readers -= 1
         local_path(source)
         if _identity(source) != before:
             if job is not None:
                 job.failed = True
             raise AppError('INPUT_CHANGED', '픽셀 소비 중 원본 정보가 변경되었습니다.')
         snapshot.check()
-        if not hit and job is not None and job.reuse and job.pixels is None:
+        if not hit and job is not None and job.reuse and (job.pixels is None or _replace):
+            if job.pixels is not None:
+                job.clear_pixels()
             job.pixels, retained = snapshot, True
     except BaseException:
         if job is not None:
@@ -109,3 +119,16 @@ def pixel_window(source, tools, video, timeline, first, count, *, complete=False
     finally:
         if not retained:
             snapshot.close()
+
+
+def prime_pixel_window(source, tools, video, timeline, first, count):
+    """Prepare a bounded group between consumers, not inside a borrowed window.
+
+    A contained complete analysis window is retained. Otherwise at most the old
+    and one new window coexist during replacement; complete requests still
+    cannot reuse a bounded-only decode. This never replaces media validation.
+    """
+    job = active_job()
+    if job is not None and job.reuse:
+        with pixel_window(source, tools, video, timeline, first, count, _replace=True):
+            pass

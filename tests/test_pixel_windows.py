@@ -11,7 +11,7 @@ from unittest.mock import patch
 from cheating_racer_detect import pixels
 from cheating_racer_detect.errors import AppError
 from cheating_racer_detect.media import Frame, Timeline
-from cheating_racer_detect.source import source_session
+from cheating_racer_detect.source import source_session, release_pixels, retain_pixels
 from cheating_racer_detect.tools import Toolchain
 
 
@@ -58,6 +58,56 @@ class Windows(unittest.TestCase):
             self.assertIsNotNone(job.pixels)
         self.assertIsNone(job.pixels)
         self.assertFalse(self.paths[0].parent.exists())
+
+    def test_batch_hold_defers_nested_release_until_outer_publication(self):
+        with source_session(pixel_parent=self.root) as job:
+            self.read(2, 6, complete=True)
+            with retain_pixels():
+                with retain_pixels():
+                    release_pixels()
+                    self.assertIsNotNone(job.pixels)
+                release_pixels()
+                self.assertEqual(self.read(4, 2), bytes([4])*12+bytes([5])*12)
+            self.assertEqual(job.pixel_holds, 0)
+            self.assertEqual(len(self.commands), 1)
+            release_pixels()
+            self.assertIsNone(job.pixels)
+            self.assertFalse(self.paths[0].parent.exists())
+
+    def test_prime_contained_hit_then_replaces_window_and_never_lends_active_cache(self):
+        with source_session(pixel_parent=self.root) as job:
+            self.read(2, 6, complete=True)
+            pixels.prime_pixel_window(self.source,self.tools,self.video,self.time,4,2)
+            self.assertEqual(len(self.commands),1)
+            pixels.prime_pixel_window(self.source,self.tools,self.video,self.time,8,6)
+            self.assertEqual(len(self.commands),2)
+            self.assertFalse(self.paths[0].parent.exists())
+            self.assertEqual(self.read(9,2),bytes([9])*12+bytes([10])*12)
+            with self.window(9,2) as stream:
+                with self.assertRaises(AppError):
+                    pixels.prime_pixel_window(self.source,self.tools,self.video,self.time,1,2)
+                self.assertEqual(stream.read(12),bytes([9])*12)
+            self.assertEqual(job.pixel_readers,0)
+            self.read(9,2,complete=True)
+            self.assertEqual(len(self.commands),3)  # Bounded-only priming cannot prove EOF.
+
+    def test_prime_disabled_and_failed_replacement_cleanup_fresh_retry(self):
+        with source_session(reuse=False,pixel_parent=self.root):
+            pixels.prime_pixel_window(self.source,self.tools,self.video,self.time,2,6)
+            self.assertEqual(len(self.commands),0)
+        with source_session(pixel_parent=self.root) as job:
+            self.read()
+            with retain_pixels():
+                with patch.object(pixels,'run_tool',side_effect=KeyboardInterrupt()),self.assertRaises(KeyboardInterrupt):
+                    pixels.prime_pixel_window(self.source,self.tools,self.video,self.time,8,6)
+                self.assertIsNone(job.pixels)
+            self.assertEqual(job.pixel_holds,0)
+            self.read()
+        self.assertTrue(all(not p.parent.exists() for p in self.paths))
+
+    def test_pixel_hold_requires_current_synchronous_job(self):
+        with self.assertRaises(RuntimeError),retain_pixels():
+            pass
 
     def test_review_miss_ordinal_bound_and_eof_request_not_reused(self):
         with source_session(pixel_parent=self.root):

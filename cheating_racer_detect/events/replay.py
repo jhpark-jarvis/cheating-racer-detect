@@ -6,13 +6,13 @@ import json
 
 from ..errors import AppError
 from ..paths import local_path, source_path
-from ..pixels import pixel_window
+from ..pixels import pixel_window, prime_pixel_window
 from ..review.video import prepare
 from ..service import _identity, _sha256
-from ..source import release_pixels, source_job
+from ..source import active_job, inspect_source, release_pixels, retain_pixels, source_job
 from ..tools import discover_tools
 from ..tracking.contracts import integer
-from .export import decimal_bound, export_candidate, validate_frame
+from .export import candidate_context, decimal_bound, export_candidate, validate_frame
 from .inputs import EventInputs, InputLaneEngine, InputLampEngine, MAX_ROWS, owned_output, write_bytes
 from .lamp import LampEngine
 
@@ -142,6 +142,55 @@ def _selection(value):
     return tuple(value)
 
 
+@dataclass(frozen=True)
+class _WindowGroup:
+    first: int
+    count: int
+    indices: tuple[int, ...]
+    prime: bool = True
+
+
+def _group_windows(windows, retained=None):
+    """Internal ordinal plan; output receipts keep the caller's original order."""
+    windows = tuple(windows)
+    groups = []
+    for first, count, index in sorted(windows):
+        if type(first) is not int or type(count) is not int or first < 0 or not 1 <= count <= MAX_ROWS:
+            raise AppError('REVIEW_LIMIT', '검토 구간은 최대 120프레임이어야 합니다.')
+        if groups and first <= groups[-1].first+groups[-1].count:
+            previous = groups[-1]
+            end = max(first+count, previous.first+previous.count)
+            if end-previous.first <= MAX_ROWS:
+                groups[-1] = _WindowGroup(previous.first, end-previous.first, previous.indices+(index,))
+                continue
+        groups.append(_WindowGroup(first, count, (index,)))
+    if retained is not None:
+        left, length = retained
+        for n, group in enumerate(groups):
+            # Do not replace a useful analysis window with a larger union when
+            # the uncovered individual requests would generate fewer pixels.
+            separate = sum(count for first,count,index in windows if index in group.indices
+                           and not (left <= first and first+count <= left+length))
+            if 0 < separate < group.count:
+                groups[n] = _WindowGroup(group.first,group.count,group.indices,False)
+    return tuple(groups)
+
+
+def _batch_windows(source, inputs, analysis, indices, tools):
+    video, _audio, timeline = inspect_source(source, tools, max_axis=1024)
+    windows = []
+    for index in indices:
+        start, end, _requested, _lamp = candidate_context(analysis.candidates[index], inputs.pre, inputs.post,
+                                                         timeline, analysis.lamps)
+        _video, _timeline, selected, first, _rotation = prepare(
+            source, decimal_bound(start, ROUND_FLOOR), decimal_bound(end, ROUND_CEILING), tools)
+        windows.append((first, len(selected), index))
+    job = active_job()
+    cached = None if job is None or not job.reuse else job.pixels
+    retained = (cached.first,cached.count) if cached is not None and cached.key[:3] == (source,tools,_identity(source)) else None
+    return video, timeline, _group_windows(windows,retained)
+
+
 @source_job
 def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, toolchain=None, catalog=None):
     """Analyze once; publish all explicitly selected bundles or none.
@@ -177,17 +226,23 @@ def export_replay_batch(input_path, inputs, output_path, *, candidate_indices, t
                 raise AppError('CATALOG_CHANGED', '후보 목록과 새 재생 결과가 다릅니다. 목록을 다시 생성하세요.')
         if any(index >= len(analysis.candidates) for index in indices):
             raise AppError('INVALID_CANDIDATE', '재생 결과에 해당 후보가 없습니다. 모든 후보 번호를 확인하세요.')
+        video, timeline, groups = _batch_windows(source, inputs, analysis, indices, tools)
         with owned_output(output_path) as stage:
             write_bytes(stage/'inputs.json', inputs.to_bytes())
             (stage/'candidates').mkdir()
-            entries = []
-            for index in indices:
-                candidate = analysis.candidates[index]
-                relative = f'candidates/{index:06d}'
-                bundle = export_candidate(source, candidate, stage/relative, recorded_observer(inputs),
-                                          pre=inputs.pre, post=inputs.post, lamps=analysis.lamps, toolchain=tools)
-                entries.append({'candidate_index': index, 'candidate': relative+'/candidate.json',
-                                'direction': candidate.direction, 'signal_state': bundle['signal_state']})
+            by_index = {}
+            with retain_pixels():
+                for group in groups:
+                    if group.prime:
+                        prime_pixel_window(source, tools, video, timeline, group.first, group.count)
+                    for index in group.indices:
+                        candidate = analysis.candidates[index]
+                        relative = f'candidates/{index:06d}'
+                        bundle = export_candidate(source, candidate, stage/relative, recorded_observer(inputs),
+                                                  pre=inputs.pre, post=inputs.post, lamps=analysis.lamps, toolchain=tools)
+                        by_index[index] = {'candidate_index': index, 'candidate': relative+'/candidate.json',
+                                           'direction': candidate.direction, 'signal_state': bundle['signal_state']}
+            entries = [by_index[index] for index in indices]
             result = {'schema': 'experimental-event-replay-batch-v1', 'status': 'complete',
                       'inputs': 'inputs.json', 'inputs_sha256': inputs.sha256, 'source_sha256': source_hash,
                       'candidate_count': len(analysis.candidates), 'selected_count': len(indices),

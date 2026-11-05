@@ -27,6 +27,9 @@ class Batch(unittest.TestCase):
         self.analysis = replay.ReplayAnalysis(tuple(SimpleNamespace(direction=d) for d in ('right', 'left', 'right')), None)
         self.analyze = self.enterContext(patch.object(replay, 'analyze_inputs', return_value=self.analysis))
         self.export = self.enterContext(patch.object(replay, 'export_candidate', side_effect=self.media))
+        self.plan = self.enterContext(patch.object(replay, '_batch_windows', side_effect=lambda _s, _i, _a, indices, _t:
+            (None, None, (replay._WindowGroup(0, 1, tuple(sorted(indices))),))))
+        self.prime = self.enterContext(patch.object(replay, 'prime_pixel_window'))
 
     def media(self, _source, candidate, output, *_args, **_kwargs):
         self.assertFalse(self.output.exists())  # Intermediate bundles aren't final results.
@@ -51,6 +54,8 @@ class Batch(unittest.TestCase):
                          ['candidates/000002/candidate.json', 'candidates/000000/candidate.json'])
         self.analyze.assert_called_once()
         self.assertEqual(self.export.call_count, 2)
+        self.assertEqual([c.args[1] for c in self.export.call_args_list],
+                         [self.analysis.candidates[0], self.analysis.candidates[2]])
         self.assertEqual(load_inputs(self.output/'inputs.json'), self.inputs)
         self.assertEqual(result['inputs_sha256'], replay._sha256(self.output/'inputs.json'))
         self.assertEqual(json.loads((self.output/'batch.json').read_text(encoding='utf-8')), result)

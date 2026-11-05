@@ -259,6 +259,8 @@ class Transactions(unittest.TestCase):
             (output/'candidate.json').write_text('{}', encoding='utf-8')
             return {'signal_state': 'no_blink_observed'}
         with patch('cheating_racer_detect.source.inspect_source', return_value=(None, None, object())), \
+                patch.object(replay, '_batch_windows', return_value=(None, None, (replay._WindowGroup(0,1,(0,)),))), \
+                patch.object(replay, 'prime_pixel_window'), \
                 patch.object(replay, 'export_candidate', side_effect=media):
             result = replay.export_replay_batch(self.source, self.inputs, self.output, candidate_indices=(0,), toolchain=object(), catalog=self.item)
         self.assertEqual(result['catalog'], 'catalog.json')

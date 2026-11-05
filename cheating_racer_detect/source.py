@@ -26,6 +26,8 @@ class _Job:
     failed: bool = False
     pixels: object | None = None
     pixel_parent: object | None = None
+    pixel_holds: int = 0
+    pixel_readers: int = 0
 
     def clear(self):
         self.snapshot = None
@@ -44,10 +46,27 @@ def active_job():
 
 
 def release_pixels():
-    """Dispose pixel resources before a workflow publishes its final result."""
+    """Dispose pixels before publication, or defer to an enclosing batch owner."""
     job = active_job()
-    if job is not None:
+    if job is not None and not job.pixel_holds:
         job.clear_pixels()
+
+
+@contextmanager
+def retain_pixels():
+    """Internal synchronous batch lease; errors still force source_session.clear().
+
+    Only nested staging publications may occur while held. The batch must exit
+    this scope and release_pixels before publishing its outer result.
+    """
+    job = active_job()
+    if job is None:
+        raise RuntimeError('Pixel retention requires an active source job')
+    job.pixel_holds += 1
+    try:
+        yield
+    finally:
+        job.pixel_holds -= 1
 
 
 @contextmanager
