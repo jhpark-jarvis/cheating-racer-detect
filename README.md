@@ -100,12 +100,12 @@ CFR/VFR·시작 offset·90도 단위 회전 metadata를 구분합니다. 분석�
 | --- | --- | --- |
 | [YOLOX-s](https://github.com/Megvii-BaseDetection/YOLOX) | COCO 탐지 후보·로컬 CPU/GPU·현재 Frame 연결 실험 | 실차 양성 탐지/ID·외관 특징의 차량 식별력 |
 | [UFLDv2 ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/tree/c903880678454dfd9b55a63022368db05c00bc6d) | 공식 CULane checkpoint의 제한 CPU/strict 로딩·합성 CPU/GPU·실제 디코딩 42회 CPU forward와 네 head 후처리 연결 | 실차 정확도·가시성/물리ID·차선 변경 수락 |
-| [RVLD](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876) | VIL 가중치3개·U 검사, model-only 360텐서 strict 적용·합성 입력의 초기/시간 단계 CPU 연산 대조 | 영상 전처리·NMS/guide 생성·원본 좌표·시퀀스 검증 |
+| [RVLD](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876) | model-only 360텐서 strict·합성 영상의 초기/시간 CPU 연산·NMS/guide·원본 PTS/좌표·상태 초기화 연결 | 전체 imgaug 환경·GPU·실차 가시성/물리 ID·정확도 |
 | [CLRNet](https://github.com/Turoad/CLRNet) / [CLRerNet](https://github.com/hirotomusiker/CLRerNet) | 위치 정밀화·confidence 대안의 원저자 자료 비교 | Windows/native extension·정확한 선택 파일의 조건 |
 | [LaneTCA](https://github.com/Alex-1337/LaneTCA) | 시간 attention·메모리·의존성 정적 비교 | 가중치/전체 실행·실제 시간과 상태 초기화 |
 | [DeepSignals](https://arxiv.org/abs/1905.01333) / [LISA](https://cvrr.ucsd.edu/vehicle-lights-dataset/) / [TLD](https://arxiv.org/abs/2409.02508) | 시공간 신호 분류·램프 위치/가시성·라벨 의미 비교 | 정확한 자료/모델 접근·권리·표본 시각·좌우/브레이크/반사/unknown 평가 |
 
-최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. 다음 실험은 RVLD 영상·좌표·시퀀스 연결, 원본 PTS·가시성 mask가 있는 램프 특징/시계열 어댑터, 외관·운동 association 비교입니다. 추정/보간은 관측 근거와 분리하고 기존 baseline을 유지합니다.
+최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. 다음 실험은 RVLD attention의 메모리 비용 비교, 원본 PTS·가시성 mask가 있는 램프 특징/시계열 어댑터, 외관·운동 association 비교입니다. 추정/보간은 관측 근거와 분리하고 기존 baseline을 유지합니다.
 
 ![YOLOX·DeepSignals와 구현의 관계](assets/figures/research-context.svg)
 
@@ -117,7 +117,8 @@ CFR/VFR·시작 offset·90도 단위 회전 metadata를 구분합니다. 분석�
 - **UFLDv2:** 고정 CULane config는 RGB resize 1600×533 뒤 아래 320행 crop·네 slot을 사용합니다. 원본 DALI/학습 utility 경로 대신 분리 구조에서 학습 가중치를 검사했습니다. 자체 색 패턴/단색 입력의 반응은 실차 GT가 아닙니다.
 - **RVLD:** 원본은 RGB resize 640×504 뒤 상단 120행 crop·100개 y표본·상위6 SVD 계수를 사용합니다. 세 원본 checkpoint의 `weights_only=True` 로딩은 NumPy scalar 메타데이터 때문에 거부됐습니다. 허용 globals를 추가하지 않고 model 데이터만 분리해 제한 CPU 재로딩·strict 적용을 대조했습니다. U는 pickle 콜백 없이 `100×100 float32`로 변환했고, 원본 stride·유한값·표본 y54~383을 확인했습니다.
 - **생성 구조:** RVLD backbone은 `weights=None`, U는 명시 입력입니다. U/pe/grid는 nonpersistent buffer이며 키·shape·dtype·BatchNorm version·적용 후 값이 일치했습니다. 생성 중 관측한 Python 파일/소켓/pretrained 호출 0회·RNG/U 보존은 전체 추론 검증과 별개입니다.
-- **단계 연산:** 학습 CPU 상태와 두 합성 RGB 텐서·명시한 guide로 초기 segmentation/coefficient와 attention·flow/warp·시간 coefficient를 실행했습니다. 원본 계산 메서드 15개의 AST를 대조한 reference와 중간·최종 텐서 28개가 정확히 일치했습니다. `DeformConv2d`는 실제 native 연산이며 `grid_sample`은 현재 환경의 원본 기본값인 `align_corners=False`를 보존합니다. 자동 guide/NMS·영상 전처리·실주행 정확도 검증은 아닙니다. 비교 프로세스 최대 working set 약 2.29GB는 로딩/reference를 포함한 단일 관측이며 운영 추론 메모리 상한이 아닙니다.
+- **연산·영상 검증:** 학습 CPU의 중간·최종 텐서 28개를 원본 계산 reference와 대조했습니다. 이어 합성 CFR/VFR·offset·회전 metadata·AAC 7종의 21프레임에서 전처리·시간 연산·NMS/guide를 대조하고, 복구 검사를 포함해 40회 관측했습니다. 누락/장면 전환 뒤 새 모델과 결과가 같았습니다. 학습 모델이 이 합성 영상에서 채택한 차선은 0개이며, 양성 곡선·guide 분기는 별도 제어 입력의 두 차선으로 검사했습니다.
+- **전처리·자원:** 고정 imgaug 0.4.0의 RGB uint8/cubic 경로를 축약해 대조했으며 전체 패키지는 실행하지 않았습니다. 좌표는 resize의 pixel center를 coded extent로 복원하고, 원본 평가기의 `W−1` export와 구분합니다. 유지 이력은 한 프레임의 특징/확률/guide 약 4.12MB입니다. 모델·중간 연산·reference를 포함한 검사 프로세스 peak 약 2.36GB는 단일 관측이며 운영 메모리 상한이 아닙니다.
 - **조건:** 코드 라이선스와 가중치/학습 데이터 조건은 별도로 확인해야 합니다. [CULane 조건](https://xingangpan.github.io/projects/CULane.html#license)은 비상업 사용·파생물/재배포를 구분합니다. [VIL-100](https://github.com/yujun0-0/MMA-Net/blob/8f95908e2814baee23c6189996062cf2d87f714a/dataset/README.md)의 CC BY-NC-SA 4.0과 RVLD root Apache-2.0 고지를 동일한 파일별 허가로 취급하지 않습니다. 전체 학습 이력·추가 파일 조건은 미확인입니다.
 
 공식 [UFLDv2 파일](https://drive.google.com/file/d/1oEjJraFr-3lxhX_OXduAGFWalWa6Xh3W/view?usp=sharing), RVLD [가중치 ZIP](https://drive.google.com/file/d/1PjbN2uQ-7DgFJjApH1vRx81vEo_Tvn-9/view?usp=sharing)·[전처리 ZIP](https://drive.google.com/file/d/14JI2BIwJ677_rCBLGQiHvl6IF-n0LIwH/view?usp=sharing)을 사용했습니다. 자체 SHA-256은 변경 탐지용이며 발행자 인증이나 권리 보증이 아닙니다.
@@ -192,7 +193,7 @@ python -m unittest discover -s tests
 | 시간·미디어 | 자체 CFR/VFR·offset·회전·AAC·긴 GOP·실패/취소/복구·원본 보존 | 실제 블랙박스 장시간/분할 파일 |
 | 추적·사건 | 수치 oracle·native OpenCV·관측/예측/모호성·주입 후보·unknown·평가 분모 | 실차 ID/탐지/자동 차선·램프 의미 |
 | batch | 7개 미디어 profile의 독립 coded BGR/원본 PTS·역순 결과·저장 재검사·정리 실패와 새 실행 | keyframe seek·실차/HD 처리 성능 |
-| 모델 연구 | UFLDv2 학습 CPU/GPU·Frame 연결, RVLD strict·학습 CPU 단계 연산 대조 | RVLD 영상/시퀀스·최종 모델 채택 |
+| 모델 연구 | UFLDv2 학습 CPU/GPU·Frame 연결, RVLD 합성 영상의 학습 CPU/후처리·상태 초기화 | RVLD 전체 imgaug/GPU·실차 정확도·최종 모델 채택 |
 | 패키지 | wheel/sdist 경계·Windows clean 설치·noML/선택 CLI | 다른 OS·공개 패키지 배포 |
 
 자체 96×64/10fps의 두 후보를 새 프로세스로 비교한 결과입니다. 5초 head와 60초 tail에서 후보·신호·원본 ordinal/PTS 매핑은 같았습니다.
@@ -226,7 +227,7 @@ python -m unittest discover -s tests
 
 HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네트워크/재분석 지점·상위 경로(`..`)는 지원하지 않습니다. 마지막 포함 프레임의 표시 길이는 요청 끝을 넘을 수 있습니다.
 
-현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 RVLD 영상·좌표·전체 상태 초기화와 timestamped 램프 특징·외관 association의 비교입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
+현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 모델 메모리 비용과 timestamped 램프 특징·외관 association의 비교입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
 
 ## References
 
