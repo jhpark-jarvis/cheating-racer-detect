@@ -179,20 +179,37 @@ candidate = result["lane"]["candidate"]  # 관측 불능이면 None
 | 입력·출력 | RGB를 **640×504로 resize한 뒤 상단 120행 제거**, 정규화; SVD basis·100개 y표본·6계수 설정 | 보간·crop 복원·좌표 관례 대조. 기존 UFLDv2 4head decoder와 별도 adapter 필요 |
 | 시퀀스 | 특징·확률·guide와 후처리 상태가 프레임 간 이어짐 | 원본 시각/문맥 변경·누락·실패·취소에서 전체 상태 초기화와 fresh 실행 대조 |
 
-일반 영상 입력을 원본 학습·평가 CLI에 연결하기 전에 이 경계를 분리해야 합니다. 현재는 소스 조사와 설계 단계이며 RVLD 가중치·basis 확보, 전체 추론·실주행 성능은 미검증입니다. 곡선 보완을 현재 가시성이나 지속 물리 경계 ID로 해석하지 않습니다.
+일반 영상 입력을 원본 학습·평가 CLI에 연결하기 전에 이 경계를 분리해야 합니다. RVLD 가중치·basis의 로컬 데이터 검사는 완료했으며 모델 구조에 대한 strict 적용·전체 추론·실주행 성능은 미검증입니다. 곡선 보완을 현재 가시성이나 지속 물리 경계 ID로 해석하지 않습니다.
 
-RVLD의 공식 [가중치 ZIP](https://drive.google.com/file/d/1PjbN2uQ-7DgFJjApH1vRx81vEo_Tvn-9/view?usp=sharing)은 291,602,086bytes·9항목, [전처리 ZIP](https://drive.google.com/file/d/14JI2BIwJ677_rCBLGQiHvl6IF-n0LIwH/view?usp=sharing)은 18,362,161bytes·10,138항목입니다. 실제 목록에서 VIL-100 checkpoint 3개와 공통 SVD `U.pickle`을 확인했습니다. 가중치 ZIP은 전체 저장 없이 HTTP Range로 목록을 확인했습니다.
+RVLD의 공식 [가중치 ZIP](https://drive.google.com/file/d/1PjbN2uQ-7DgFJjApH1vRx81vEo_Tvn-9/view?usp=sharing)은 291,602,086bytes·9항목, [전처리 ZIP](https://drive.google.com/file/d/14JI2BIwJ677_rCBLGQiHvl6IF-n0LIwH/view?usp=sharing)은 18,362,161bytes·10,138항목입니다. VIL-100 checkpoint 3개를 HTTP Range로 선택 확보하고 공통 SVD `U.pickle`을 검사했습니다. 가중치 ZIP 전체를 저장하지 않았으며 선택 전송은 146,498,872bytes였습니다.
 
 | VIL-100 역할 | member bytes | 검증 수준 |
 | --- | ---: | --- |
-| segmentation checkpoint | 144,073,841 | ZIP directory 선언값; payload CRC/SHA·state 미검증 |
-| coefficient checkpoint | 3,209,961 | ZIP directory 선언값; payload CRC/SHA·state 미검증 |
-| temporal checkpoint | 11,637,793 | ZIP directory 선언값; payload CRC/SHA·state 미검증 |
-| SVD U.pickle | 40,405 | 전체 member CRC/SHA·정적 pickle 분석; Tensor 로딩 미실행 |
+| segmentation checkpoint | 144,073,841 | payload CRC/SHA·model 데이터 178텐서 / 48,015,088bytes |
+| coefficient checkpoint | 3,209,961 | payload CRC/SHA·model 데이터 52텐서 / 1,061,280bytes |
+| temporal checkpoint | 11,637,793 | payload CRC/SHA·model 데이터 130텐서 / 3,955,200bytes |
+| SVD U.pickle | 40,405 | CRC/SHA·데이터 전용 변환, `100×100 float32`·유한값 확인 |
 
-전처리 ZIP의 로컬 SHA-256은 `fe993a445f074740b75bbdf30463137772dc7881f837411e7b6ca4ac24ca78c1`, U의 SHA-256은 `911f3206a60548261fc834265fa443d425b6926e1dbba75994bc503015bfc169`입니다. U는 protocol 5이며 Torch storage 재구성 참조와 내부 `cuda:0` 문자열을 확인했습니다. [basis 생성 코드](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/Preprocessing/VIL-100/P02_SVD/code/libs/preprocess.py)와 함께 별도 제한 변환이 필요한 근거입니다. pickle을 실행하거나 Tensor의 shape·dtype·유한값을 검증한 것은 아닙니다.
+원본 세 checkpoint는 평가 메타데이터의 `numpy.core.multiarray.scalar` 때문에 `torch.load(weights_only=True, map_location="cpu")`가 거부했습니다. 허용 globals를 추가하지 않고, opcode를 실행하지 않는 제한 분석으로 **model 텐서 데이터만** CPU에 복원했습니다. 총 360텐서의 shape·dtype·유한값과 BatchNorm version을 확인하고 새 model-only 메모리 buffer의 제한 로딩·값 동일성을 대조했습니다. 원본 전체 파일의 제한 로딩 성공이나 모델 구조와의 strict 일치를 의미하지 않습니다. [PyTorch 제한 로딩](https://docs.pytorch.org/docs/2.8/generated/torch.load.html)
 
-RVLD 저장소의 [Apache-2.0 고지](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/LICENSE)와 VIL-100의 [CC BY-NC-SA 4.0 데이터 조건](https://github.com/yujun0-0/MMA-Net/blob/8f95908e2814baee23c6189996062cf2d87f714a/dataset/README.md)은 구분합니다. 두 ZIP에서 LICENSE·NOTICE·README·terms·COPYING 이름을 가진 추가 고지 파일은 찾지 못했습니다. 이 파일명 검색을 전체 파일의 재배포 허가로 해석하지 않으며, 실제 checkpoint 로딩·basis 변환·학습된 모델의 추론과 실주행 성능은 아직 미검증입니다.
+U는 protocol 5·단일 FloatStorage의 원시 float32를 데이터 전용 NPY로 변환했습니다. pickle 콜백을 실행하지 않고 원본 stride `(1,100)`을 반영했으며, [basis 생성 코드](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/Preprocessing/VIL-100/P02_SVD/code/libs/preprocess.py)와 [모델 config](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/Modeling/VIL-100/PLD/code/options/config.py)의 100개 y표본·상위 6열 사용을 대조했습니다. 표본 y 범위는 crop 이후 54~383이며, `max|UᵀU−I|=5.83×10⁻⁸`은 행렬 관찰값입니다. 차선 정확도 측정은 아닙니다.
+
+<details>
+<summary>확보 파일의 로컬 SHA-256</summary>
+
+| 파일 | SHA-256 |
+| --- | --- |
+| segmentation | `c488ecd893d59efc7ae7f0f823c484f6fc0c5a39c33f81e67acc4989066c4ecc` |
+| coefficient | `ba0ff33f3d8a11ffcd1bf2cebd38be0582a1f454aa7ac33493572f54a20c2f1c` |
+| temporal | `ba84c341be8feffb3275552fb81196807b6db9082d377989743e0137199be5a9` |
+| 전처리 ZIP | `fe993a445f074740b75bbdf30463137772dc7881f837411e7b6ca4ac24ca78c1` |
+| U.pickle | `911f3206a60548261fc834265fa443d425b6926e1dbba75994bc503015bfc169` |
+
+자체 계산한 변경 탐지용 해시이며 발행자 checksum이나 파일별 권리 보증은 아닙니다.
+
+</details>
+
+RVLD 저장소의 [Apache-2.0 고지](https://github.com/dongkwonjin/RVLD/blob/4d90de138bc0122f6019cd73e452ad1955f42876/LICENSE)와 VIL-100의 [CC BY-NC-SA 4.0 데이터 조건](https://github.com/yujun0-0/MMA-Net/blob/8f95908e2814baee23c6189996062cf2d87f714a/dataset/README.md)은 구분합니다. 두 ZIP에서 LICENSE·NOTICE·README·terms·COPYING 이름을 가진 추가 고지 파일은 찾지 못했습니다. 이 파일명 검색을 전체 파일의 재배포 허가로 해석하지 않으며, 학습된 RVLD 모델의 추론과 실주행 성능은 아직 미검증입니다.
 
 ### 2.2 Lamp ROI and signal candidates
 
