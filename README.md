@@ -100,12 +100,12 @@ CFR/VFR·시작 offset·90도 단위 회전 metadata를 구분합니다. 분석�
 | --- | --- | --- |
 | [YOLOX-s](https://github.com/Megvii-BaseDetection/YOLOX) | COCO 탐지 후보·로컬 CPU/GPU·현재 Frame 연결 실험 | 실차 양성 탐지/ID·외관 특징의 차량 식별력 |
 | [UFLDv2 ResNet-18](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2/tree/c903880678454dfd9b55a63022368db05c00bc6d) | 공식 CULane checkpoint의 제한 CPU/strict 로딩·합성 CPU/GPU·실제 디코딩 42회 CPU forward와 네 head 후처리 연결 | 실차 정확도·가시성/물리ID·차선 변경 수락 |
-| [RVLD](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876) | model-only 360텐서 strict·합성 영상의 초기/시간 CPU 연산·NMS/guide·원본 PTS/좌표·상태 초기화 연결 | 전체 imgaug 환경·GPU·실차 가시성/물리 ID·정확도 |
+| [RVLD](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876) | model-only 360텐서 strict·합성 영상의 학습 CPU/후처리·원본 PTS/좌표·상태 초기화·attention 행 타일 비교 | 전체 imgaug 환경·GPU·실차 가시성/물리 ID·정확도 |
 | [CLRNet](https://github.com/Turoad/CLRNet) / [CLRerNet](https://github.com/hirotomusiker/CLRerNet) | 위치 정밀화·confidence 대안의 원저자 자료 비교 | Windows/native extension·정확한 선택 파일의 조건 |
 | [LaneTCA](https://github.com/Alex-1337/LaneTCA) | 시간 attention·메모리·의존성 정적 비교 | 가중치/전체 실행·실제 시간과 상태 초기화 |
 | [DeepSignals](https://arxiv.org/abs/1905.01333) / [LISA](https://cvrr.ucsd.edu/vehicle-lights-dataset/) / [TLD](https://arxiv.org/abs/2409.02508) | 시공간 신호 분류·램프 위치/가시성·라벨 의미 비교 | 정확한 자료/모델 접근·권리·표본 시각·좌우/브레이크/반사/unknown 평가 |
 
-최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. 다음 실험은 RVLD attention의 메모리 비용 비교, 원본 PTS·가시성 mask가 있는 램프 특징/시계열 어댑터, 외관·운동 association 비교입니다. 추정/보간은 관측 근거와 분리하고 기존 baseline을 유지합니다.
+최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. RVLD의 명시 행 타일 경로를 기존 baseline과 비교했고, 다음 실험은 원본 PTS·가시성 mask가 있는 램프 특징/시계열 어댑터와 외관·운동 association입니다. 추정/보간은 관측 근거와 분리하고 기존 기본 경로를 유지합니다.
 
 ![YOLOX·DeepSignals와 구현의 관계](assets/figures/research-context.svg)
 
@@ -196,6 +196,16 @@ python -m unittest discover -s tests
 | 모델 연구 | UFLDv2 학습 CPU/GPU·Frame 연결, RVLD 합성 영상의 학습 CPU/후처리·상태 초기화 | RVLD 전체 imgaug/GPU·실차 정확도·최종 모델 채택 |
 | 패키지 | wheel/sdist 경계·Windows clean 설치·noML/선택 CLI | 다른 OS·공개 패키지 배포 |
 
+RVLD attention은 같은 `1×64×96×160` 입력·7×7 이웃을 사용해 전체 unfold와 8행 타일을 비교했습니다. CPU 2 threads·경로당 새 프로세스 3회·각 warmup 1회/측정 3회 조건입니다.
+
+| Attention 비용 | 전체 unfold | 8행 타일 |
+| --- | ---: | ---: |
+| 최대 단일 unfold payload | 192.68MB | 16.06MB |
+| 프로세스 peak working set 중앙값 | 1.31GB | 0.58GB |
+| 측정 호출 시간 중앙값 | 1.90초 | 1.39초 |
+
+위 수치는 격리한 attention 연산의 관측값입니다. 프로세스 peak에는 import·입력이 포함되고, 시간에는 검사 계측이 포함됩니다. 전체 추론·제품의 메모리/속도 개선율은 아닙니다. 타일 1/4/8/16행의 학습 텐서 40개와 합성 7종·21프레임의 baseline/8행 경로 출력은 정확히 같았습니다. 기존 기본 경로는 유지합니다.
+
 자체 96×64/10fps의 두 후보를 새 프로세스로 비교한 결과입니다. 5초 head와 60초 tail에서 후보·신호·원본 ordinal/PTS 매핑은 같았습니다.
 
 | 배치 비용 | 이전 | 공유 윈도우 |
@@ -227,7 +237,7 @@ python -m unittest discover -s tests
 
 HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네트워크/재분석 지점·상위 경로(`..`)는 지원하지 않습니다. 마지막 포함 프레임의 표시 길이는 요청 끝을 넘을 수 있습니다.
 
-현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 모델 메모리 비용과 timestamped 램프 특징·외관 association의 비교입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
+현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 램프 시간 특징·외관 association 비교와 전체 추론 비용 검증입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
 
 ## References
 
