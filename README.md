@@ -65,6 +65,8 @@ CFR/VFR·시작 offset·90도 단위 회전 metadata를 구분합니다. 분석�
 
 램프는 같은 실제 차량의 명시 crop·좌우 부분·가시성/의미를 원본 좌표로 연결하고, whole-pixel BGR 밝기의 hysteresis와 실제 PTS의 phase/cycle·관측창을 검사합니다. 가시성/신호 의미가 외부에서 확인되지 않거나 ROI·관측창이 부족하면 unknown으로 남깁니다. 이는 밝기 패턴 분석이며 브레이크/반사광·방향지시등 의미의 자동 구분은 미구현입니다. `no_blink_observed`는 지정된 관측창의 결과이며 논리적 OFF나 위반 확정이 아닙니다. [LampObservation](cheating_racer_detect/events/lamp_observations.py), [LampEngine](cheating_racer_detect/events/lamp.py)
 
+별도 시간 특징 연구는 원본 PTS·좌우 색/국소 대비·결측 mask를 제한 버퍼에 보관합니다. 불규칙 시각에서 harmonic fit을 계산하되 점수는 파형 진단으로만 사용합니다. 가림을 어두운 픽셀로 채우거나 주파수 peak를 점멸 의미로 변환하지 않습니다.
+
 ### 2.4 Replay, batching and verification
 
 ![원본 검증·주입 입력 재생·결과 확정](assets/figures/input-replay.svg)
@@ -103,9 +105,9 @@ CFR/VFR·시작 offset·90도 단위 회전 metadata를 구분합니다. 분석�
 | [RVLD](https://github.com/dongkwonjin/RVLD/tree/4d90de138bc0122f6019cd73e452ad1955f42876) | model-only 360텐서 strict·합성 영상의 학습 CPU/후처리·원본 PTS/좌표·상태 초기화·attention 행 타일 비교 | 전체 imgaug 환경·GPU·실차 가시성/물리 ID·정확도 |
 | [CLRNet](https://github.com/Turoad/CLRNet) / [CLRerNet](https://github.com/hirotomusiker/CLRerNet) | 위치 정밀화·confidence 대안의 원저자 자료 비교 | Windows/native extension·정확한 선택 파일의 조건 |
 | [LaneTCA](https://github.com/Alex-1337/LaneTCA) | 시간 attention·메모리·의존성 정적 비교 | 가중치/전체 실행·실제 시간과 상태 초기화 |
-| [DeepSignals](https://arxiv.org/abs/1905.01333) / [LISA](https://cvrr.ucsd.edu/vehicle-lights-dataset/) / [TLD](https://arxiv.org/abs/2409.02508) | 시공간 신호 분류·램프 위치/가시성·라벨 의미 비교 | 정확한 자료/모델 접근·권리·표본 시각·좌우/브레이크/반사/unknown 평가 |
+| [DeepSignals](https://arxiv.org/abs/1905.01333) / [LISA](https://cvrr.ucsd.edu/vehicle-lights-dataset/) / [TLD](https://arxiv.org/abs/2409.02508) | 시공간 신호·램프 위치/가시성·라벨 의미 비교, 별도 원본 PTS 특징/결측 버퍼·제어 반례 | 정확한 자료/모델 접근·권리·실차 좌우/브레이크/반사/unknown 평가 |
 
-최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. RVLD의 명시 행 타일 경로를 기존 baseline과 비교했고, 다음 실험은 원본 PTS·가시성 mask가 있는 램프 특징/시계열 어댑터와 외관·운동 association입니다. 추정/보간은 관측 근거와 분리하고 기존 기본 경로를 유지합니다.
+최종 모델은 미채택입니다. 논문의 벤치마크 수치를 이 프로젝트의 성능으로 사용하지 않습니다. 행 타일과 램프 시간 특징은 격리 연구이며 공개 자동 추론 명령에 연결되지 않았습니다. 다음은 램프 ROI/관측 품질과 외관·운동 association 비교입니다. 추정/보간은 관측 근거와 분리하고 기존 기본 경로를 유지합니다.
 
 ![YOLOX·DeepSignals와 구현의 관계](assets/figures/research-context.svg)
 
@@ -194,6 +196,7 @@ python -m unittest discover -s tests
 | 추적·사건 | 수치 oracle·native OpenCV·관측/예측/모호성·주입 후보·unknown·평가 분모 | 실차 ID/탐지/자동 차선·램프 의미 |
 | batch | 7개 미디어 profile의 독립 coded BGR/원본 PTS·역순 결과·저장 재검사·정리 실패와 새 실행 | keyframe seek·실차/HD 처리 성능 |
 | 모델 연구 | UFLDv2 학습 CPU/GPU·Frame 연결, RVLD 합성 영상의 학습 CPU/후처리·상태 초기화 | RVLD 전체 imgaug/GPU·실차 정확도·최종 모델 채택 |
+| 램프 시간 특징 | 제어 9조건·657표본, 자체 CFR/VFR 3종·171프레임의 독립 원본 PTS/픽셀·특징 대조 | 자동 ROI·의미 분류·실차 성능 |
 | 패키지 | wheel/sdist 경계·Windows clean 설치·noML/선택 CLI | 다른 OS·공개 패키지 배포 |
 
 RVLD attention은 같은 `1×64×96×160` 입력·7×7 이웃을 사용해 전체 unfold와 8행 타일을 비교했습니다. CPU 2 threads·경로당 새 프로세스 3회·각 warmup 1회/측정 3회 조건입니다.
@@ -205,6 +208,8 @@ RVLD attention은 같은 `1×64×96×160` 입력·7×7 이웃을 사용해 전�
 | 측정 호출 시간 중앙값 | 1.90초 | 1.39초 |
 
 위 수치는 격리한 attention 연산의 관측값입니다. 프로세스 peak에는 import·입력이 포함되고, 시간에는 검사 계측이 포함됩니다. 전체 추론·제품의 메모리/속도 개선율은 아닙니다. 타일 1/4/8/16행의 학습 텐서 40개와 합성 7종·21프레임의 baseline/8행 경로 출력은 정확히 같았습니다. 기존 기본 경로는 유지합니다.
+
+램프 실험에서는 실제 점멸 외에 **공통 조명 변화와 정지 이미지의 ROI 흔들림**도 높은 1.5Hz 적합도를 만들었습니다. 균일 2Hz 표본에서는 0.5Hz와 1.5Hz가 같은 적합도를 보였습니다. 국소 대비가 제거한 공통 조명 반례도 있었지만 ROI 흔들림은 남았습니다. 주기만으로 신호를 분류할 수 없으며, 이 점수는 점멸 확률·관측 coverage·실차 정확도가 아닙니다.
 
 자체 96×64/10fps의 두 후보를 새 프로세스로 비교한 결과입니다. 5초 head와 60초 tail에서 후보·신호·원본 ordinal/PTS 매핑은 같았습니다.
 
@@ -237,7 +242,7 @@ RVLD attention은 같은 `1×64×96×160` 입력·7×7 이웃을 사용해 전�
 
 HEVC·HDR·다중 비디오/자막/데이터 트랙·분할 파일 결합·네트워크/재분석 지점·상위 경로(`..`)는 지원하지 않습니다. 마지막 포함 프레임의 표시 길이는 요청 끝을 넘을 수 있습니다.
 
-현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 램프 시간 특징·외관 association 비교와 전체 추론 비용 검증입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
+현재 입력 주입형 규칙은 자동 차량 자세·자차 이동·차선 가시성/물리 ID·램프 위치/좌우/의미 인식을 대신하지 않습니다. 다음은 램프 ROI/관측 품질·외관 association 비교와 전체 추론 비용 검증입니다. 현재 가시성·점멸 증거를 예측/생성 픽셀로 채우지 않습니다. 실영상 정밀도/재현율·unknown coverage·연속 파일·사용자 검토 효과와 최종 모델/전체 권리는 미검증입니다. 자동 신고·법적 위반 확정을 제공하지 않으며 프로젝트 라이선스는 미정입니다.
 
 ## References
 
